@@ -94,3 +94,7 @@ watchfiles==1.2.0
 websocket-client==1.9.0
 websockets==16.0
 yarl==1.24.2
+faster-whisper==1.1.1
+sounddevice==0.5.1
+soundfile==0.13.1
+pyttsx3==2.99
