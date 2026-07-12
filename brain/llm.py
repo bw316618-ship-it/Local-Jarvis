@@ -1,28 +1,46 @@
 from ollama import Client
 from memory.retriever import JarvisMemory
-from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS
+from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
 
 # Safety valve: caps how many tool-call round-trips happen for a single
-# user message, in case the model gets stuck calling tools repeatedly.
-MAX_TOOL_ROUNDS = 3
+# user message. Bumped up from the original 3 -- multi-step desktop tasks
+# (e.g. "open the app, click here, type this") legitimately need more turns.
+MAX_TOOL_ROUNDS = 6
+
+
+def _default_confirm(name: str, arguments: dict) -> bool:
+    """Fallback confirmation prompt, used if the caller doesn't supply one.
+
+    Defaults to a plain input() prompt rather than auto-approving, since a
+    risky tool with no confirmation path at all would silently defeat the
+    whole point of RISKY_TOOLS.
+    """
+    print(f"\nJarvis wants to run '{name}' with arguments: {arguments}")
+    answer = input("Allow this? [y/N] ").strip().lower()
+    return answer == "y"
 
 
 class JarvisLLM:
-    def __init__(self, model="llama3.1:8b"):
+    def __init__(self, model="llama3.1:8b", confirm_callback=None):
         self.client = Client(host="http://localhost:11434")
         self.model = model
         self.memory = JarvisMemory()
+        self.confirm_callback = confirm_callback or _default_confirm
 
         self.system_prompt = (
-            "You are Jarvis, a local AI assistant running fully on my laptop.\n"
-            "You answer questions using the provided context.\n"
-            "If the answer is not in the context, say you do not know.\n"
-            "You do not use the internet unless explicitly instructed.\n"
-            "You have access to tools -- use them when they would make your "
-            "answer more accurate (e.g. arithmetic, the current time) or when "
-            "asked to read, write, delete, or list files. File tools only see "
-            "a sandboxed 'workspace' folder, not the whole computer. Only call "
-            "a tool when it's actually needed.\n"
+            "You are Jarvis, a local-first AI assistant with broad access to "
+            "my laptop, running mostly offline.\n"
+            "You answer questions using the provided context when it's relevant.\n"
+            "You have tools to manage files, run system commands, control the "
+            "mouse and keyboard, open applications, and search the web. Use "
+            "them whenever they help complete the task -- don't just describe "
+            "what you would do, actually do it by calling the right tool.\n"
+            "Only use the web_search tool when the task genuinely needs current "
+            "or external information; otherwise stay offline.\n"
+            "Some tools require the user's explicit confirmation before they "
+            "run. If one is declined, tell the user and suggest an alternative "
+            "rather than trying to achieve the same thing a different way "
+            "without asking.\n"
         )
 
     def _run_tool_call(self, tool_call) -> str:
@@ -32,6 +50,15 @@ class JarvisLLM:
         func = TOOL_FUNCTIONS.get(name)
         if func is None:
             return f"Error: unknown tool '{name}'"
+
+        if name in RISKY_TOOLS:
+            approved = self.confirm_callback(name, arguments)
+            if not approved:
+                return (
+                    f"The user declined to run '{name}'. Do not attempt this "
+                    "exact action again or try to achieve the same outcome "
+                    "another way without asking first."
+                )
 
         try:
             return str(func(**arguments))
@@ -71,7 +98,8 @@ class JarvisLLM:
                 return message["content"]
 
             # Record the assistant's tool-call request, run each tool it
-            # asked for, and feed the results back for a follow-up turn.
+            # asked for (with confirmation for risky ones), and feed the
+            # results back for a follow-up turn.
             messages.append(message)
 
             for tool_call in tool_calls:
