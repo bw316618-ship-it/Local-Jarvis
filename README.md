@@ -63,14 +63,20 @@ Type `exit` or `quit` to end the session.
 
 Both run fully locally: speech-to-text via faster-whisper, text-to-speech via your OS's built-in voices (SAPI5 on Windows). The first time you use `/voice`, it downloads a small Whisper model (~150 MB) and caches it -- expect a short delay only on that first use.
 
+### Full system access
+
+Jarvis can now run shell commands, launch apps/files/URLs, control the mouse and keyboard, read/write/delete files anywhere on the machine, and search the web when a task needs current information.
+
+**Every action that changes something on your machine asks for your confirmation first** -- Jarvis will show you exactly what it wants to run and wait for a yes/no. This covers: running commands, opening applications, clicking, typing, hotkeys, and writing or deleting files outside its own `workspace/` sandbox. Reads (files, directory listings, web search) run without asking, since they can't change anything.
+
 ## Roadmap
 
-Planned capabilities, roughly in build order:
+Original planned capabilities -- all shipped:
 
 1. ~~**Tool calling**~~ — done. Jarvis can invoke functions (calculator, current time, directory listing) instead of just chatting.
 2. ~~**File management**~~ — done. Sandboxed read/write/delete tools scoped to a `workspace/` folder.
 3. ~~**Voice assistant**~~ — done. `/voice` for speech input, `/speak on` for spoken replies.
-4. **Desktop automation** — control local apps and workflows
+4. ~~**Desktop automation**~~ — done. Shell commands, app launching, mouse/keyboard control, unrestricted file access, and web search -- all gated by confirmation for anything risky.
 
 ## Project structure
 
@@ -79,14 +85,18 @@ Local-Jarvis/
 ├── start_jarvis.bat     # Windows double-click launcher
 ├── main.py              # CLI entry point / chat loop
 ├── brain/
-│   └── llm.py            # Ollama LLM wrapper + tool-calling loop
+│   └── llm.py            # Ollama LLM wrapper + tool-calling loop + confirmation gating
 ├── memory/
 │   └── retriever.py       # ChromaDB-backed semantic search
 ├── ingest/
 │   └── ingest.py          # Document ingestion into the vector store
 ├── tools/
-│   ├── tools.py            # Tool registry (calculator, time, directory listing)
-│   └── file_manager.py     # Sandboxed file read/write/delete tools
+│   ├── tools.py            # Central tool registry (schemas, functions, risky-tool set)
+│   ├── file_manager.py     # Sandboxed file read/write/delete tools (workspace/ only)
+│   ├── full_access_files.py # Unrestricted file read/write/delete (confirmed for writes/deletes)
+│   ├── system.py            # Shell commands + app launching (confirmed)
+│   ├── desktop_control.py   # Mouse/keyboard control (confirmed)
+│   └── web.py                # Web search (read-only, not confirmed)
 ├── voice/
 │   └── voice.py            # Local speech-to-text (faster-whisper) + text-to-speech (pyttsx3)
 ├── workspace/            # Sandbox folder file tools operate in (gitignored)
