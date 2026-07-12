@@ -56,13 +56,20 @@ python main.py
 
 Type `exit` or `quit` to end the session.
 
+### Voice
+
+- `/voice` — record 6 seconds from your microphone and send it as your message (`/voice 10` records for 10 seconds instead)
+- `/speak on` / `/speak off` — toggle whether Jarvis speaks its replies aloud (off by default)
+
+Both run fully locally: speech-to-text via faster-whisper, text-to-speech via your OS's built-in voices (SAPI5 on Windows). The first time you use `/voice`, it downloads a small Whisper model (~150 MB) and caches it -- expect a short delay only on that first use.
+
 ## Roadmap
 
 Planned capabilities, roughly in build order:
 
 1. ~~**Tool calling**~~ — done. Jarvis can invoke functions (calculator, current time, directory listing) instead of just chatting.
 2. ~~**File management**~~ — done. Sandboxed read/write/delete tools scoped to a `workspace/` folder.
-3. **Voice assistant** — speech-to-text input and text-to-speech output
+3. ~~**Voice assistant**~~ — done. `/voice` for speech input, `/speak on` for spoken replies.
 4. **Desktop automation** — control local apps and workflows
 
 ## Project structure
@@ -80,6 +87,8 @@ Local-Jarvis/
 ├── tools/
 │   ├── tools.py            # Tool registry (calculator, time, directory listing)
 │   └── file_manager.py     # Sandboxed file read/write/delete tools
+├── voice/
+│   └── voice.py            # Local speech-to-text (faster-whisper) + text-to-speech (pyttsx3)
 ├── workspace/            # Sandbox folder file tools operate in (gitignored)
 └── requirements.txt
 ```
