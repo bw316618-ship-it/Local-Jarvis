@@ -25,16 +25,22 @@ class JarvisMemory:
 
         print("Collections:", self.client.list_collections())
 
-        self.collection = self.client.get_collection(
+        # get_or_create_collection avoids a crash on first run, before
+        # ingest.py has ever been executed and the collection exists.
+        self.collection = self.client.get_or_create_collection(
             name="jarvis_memory"
         )
 
     def search(self, query: str, k: int = 5):
+        # Nothing has been ingested yet -- don't bother querying.
+        if self.collection.count() == 0:
+            return []
+
         embedding = self.embedder.encode(query).tolist()
 
         results = self.collection.query(
             query_embeddings=[embedding],
-            n_results=k
+            n_results=min(k, self.collection.count())
         )
 
         documents = results.get("documents", [[]])
