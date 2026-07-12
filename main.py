@@ -5,16 +5,24 @@ from voice.voice import JarvisVoice
 console = Console()
 
 HELP_TEXT = (
-    "[dim]Commands: /voice (or /voice N) to speak your message instead of "
-    "typing it, /speak on|off to toggle spoken replies, exit/quit to leave.[/dim]"
+    "[dim]Jarvis can run commands, manage files anywhere, control your "
+    "mouse/keyboard, open apps, and search the web -- it will ask before "
+    "anything risky. Commands: /voice (or /voice N) to speak your message, "
+    "/speak on|off to toggle spoken replies, exit/quit to leave.[/dim]"
 )
+
+
+def confirm_tool_call(name: str, arguments: dict) -> bool:
+    console.print(f"\n[bold yellow]Jarvis wants to run:[/bold yellow] {name}({arguments})")
+    answer = console.input("[bold yellow]Allow this? [y/N] > [/bold yellow]").strip().lower()
+    return answer == "y"
 
 
 def main():
     console.print("[bold cyan]Jarvis is online[/bold cyan]")
     console.print(HELP_TEXT + "\n")
 
-    jarvis = JarvisLLM()
+    jarvis = JarvisLLM(confirm_callback=confirm_tool_call)
     voice = JarvisVoice()
     speak_replies = False
 
