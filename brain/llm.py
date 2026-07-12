@@ -19,8 +19,10 @@ class JarvisLLM:
             "If the answer is not in the context, say you do not know.\n"
             "You do not use the internet unless explicitly instructed.\n"
             "You have access to tools -- use them when they would make your "
-            "answer more accurate (e.g. arithmetic, the current time, or "
-            "listing local files). Only call a tool when it's actually needed.\n"
+            "answer more accurate (e.g. arithmetic, the current time) or when "
+            "asked to read, write, delete, or list files. File tools only see "
+            "a sandboxed 'workspace' folder, not the whole computer. Only call "
+            "a tool when it's actually needed.\n"
         )
 
     def _run_tool_call(self, tool_call) -> str:
