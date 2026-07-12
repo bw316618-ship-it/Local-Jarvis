@@ -6,6 +6,9 @@ __pycache__/
 # Virtual environment
 venv/
 
+# Jarvis file-management sandbox
+workspace/
+
 # Chroma database
 memory/chroma/
 
