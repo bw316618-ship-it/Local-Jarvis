@@ -16,6 +16,8 @@ import operator
 from datetime import datetime
 from pathlib import Path
 
+from tools.file_manager import FILE_TOOL_SCHEMAS, FILE_TOOL_FUNCTIONS
+
 
 # ---------------------------------------------------------------------------
 # Tool implementations
@@ -130,8 +132,11 @@ TOOL_SCHEMAS = [
     },
 ]
 
+TOOL_SCHEMAS += FILE_TOOL_SCHEMAS
+
 TOOL_FUNCTIONS = {
     "get_current_time": get_current_time,
     "calculate": calculate,
     "list_directory": list_directory,
 }
+TOOL_FUNCTIONS.update(FILE_TOOL_FUNCTIONS)
