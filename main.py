@@ -21,6 +21,13 @@ def confirm_tool_call(name: str, arguments: dict) -> bool:
     return answer == "y"
 
 
+def show_step(message: str) -> None:
+    if message.startswith("Plan:"):
+        console.print(f"[bold magenta]{message}[/bold magenta]")
+    else:
+        console.print(f"[dim]{message}[/dim]")
+
+
 def main():
     console.print("[bold cyan]Jarvis is online[/bold cyan]")
     console.print(HELP_TEXT + "\n")
@@ -80,7 +87,7 @@ def main():
             user_input = transcribed
 
         try:
-            reply = jarvis.chat(user_input)
+            reply = jarvis.chat(user_input, on_step=show_step)
             console.print(f"[bold blue]Jarvis >[/bold blue] {reply}\n")
             if speak_replies:
                 voice.speak(reply)
