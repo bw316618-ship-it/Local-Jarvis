@@ -69,14 +69,47 @@ Jarvis can now run shell commands, launch apps/files/URLs, control the mouse and
 
 **Every action that changes something on your machine asks for your confirmation first** -- Jarvis will show you exactly what it wants to run and wait for a yes/no. This covers: running commands, opening applications, clicking, typing, hotkeys, and writing or deleting files outside its own `workspace/` sandbox. Reads (files, directory listings, web search) run without asking, since they can't change anything.
 
+### Semantic file search
+
+Find files by what they're *about*, not just their name -- e.g. "find the PDF where I wrote about binary trees" -- across `.txt`, `.md`, `.py`, `.pdf`, and `.docx` files.
+
+- `/index` — (re)index your Documents, Desktop, and Downloads folders. Only new or changed files are processed each time, so it's cheap to run again later.
+- Once indexed, just ask normally -- e.g. "find my notes about the Flask project" -- and Jarvis calls `search_files` automatically.
+
+This is separate from the manual `ingest/ingest.py` knowledge base: that one is for documents you deliberately curate, this one is for finding *anything* on disk without ingesting it by hand first. Note there's no background file-watcher yet -- re-run `/index` when you want it to notice new or changed files.
+
+## Vision
+
+The goal isn't a chatbot with some tools bolted on -- it's treating the whole computer as something you talk to. Not "open Explorer, search folders, open Chrome, copy files" but "find the PDF where I wrote about binary trees" and it just knows. Eventually the OS becomes the hardware layer and Jarvis becomes the interface.
+
 ## Roadmap
 
-Original planned capabilities -- all shipped:
+**Phase 1 — Foundation** ✅ *done*
+Offline LLM, local RAG, CLI, file indexing.
 
-1. ~~**Tool calling**~~ — done. Jarvis can invoke functions (calculator, current time, directory listing) instead of just chatting.
-2. ~~**File management**~~ — done. Sandboxed read/write/delete tools scoped to a `workspace/` folder.
-3. ~~**Voice assistant**~~ — done. `/voice` for speech input, `/speak on` for spoken replies.
-4. ~~**Desktop automation**~~ — done. Shell commands, app launching, mouse/keyboard control, unrestricted file access, and web search -- all gated by confirmation for anything risky.
+**Phase 2 — File & system control** — *mostly done*
+- ✅ File manipulation (read/write/delete, sandboxed and unrestricted)
+- ✅ Open apps
+- ✅ Run terminal commands
+- ✅ Semantic file search — finds files by content/meaning across Documents/Desktop/Downloads via `/index` + `search_files`
+- ⬜ Git integration — no awareness of repos, branches, commits, or status yet.
+
+**Phase 3 — Planning & reasoning** — *partially done*
+- ✅ Tool selection — the model already picks which tool to call per turn.
+- ⬜ Actual multi-step planning — right now each tool call is a reactive one-at-a-time decision (capped at 6 rounds), not an upfront plan for something like "create a Flask API, run it, test it, fix errors, commit." That style of task needs a planning layer on top of what exists.
+
+**Phase 4 — Voice** ✅ *done*
+Speech input (`/voice`), offline recognition (faster-whisper), text-to-speech (`/speak on`). Not yet built: a wake word (currently opt-in per message via `/voice`, not always-listening).
+
+**Phase 5 — Desktop automation** — *partially done*
+- ✅ Mouse, keyboard
+- ⬜ OCR, screenshot understanding — Jarvis can click and type, but can't yet *see* the screen to know what it's clicking on.
+
+**Phase 6 — Long-term memory** — *not started*
+User preferences, learned habits, project history that persists across sessions. Currently there's only the RAG store (documents you've ingested) -- no memory of past conversations, decisions, or where you left off on something.
+
+**Phase 7 — Self-improvement** — *not started*
+Proactive suggestions ("you search this folder daily, should I index it permanently?", "this script has failed three times, want a fix?"). Needs Phase 6 first -- you can't notice patterns without memory of the past.
 
 ## Project structure
 
@@ -87,13 +120,14 @@ Local-Jarvis/
 ├── brain/
 │   └── llm.py            # Ollama LLM wrapper + tool-calling loop + confirmation gating
 ├── memory/
-│   └── retriever.py       # ChromaDB-backed semantic search
+│   └── retriever.py       # ChromaDB-backed semantic search over manually-ingested docs
 ├── ingest/
-│   └── ingest.py          # Document ingestion into the vector store
+│   └── ingest.py          # Manual document ingestion into the 'jarvis_memory' collection
 ├── tools/
 │   ├── tools.py            # Central tool registry (schemas, functions, risky-tool set)
 │   ├── file_manager.py     # Sandboxed file read/write/delete tools (workspace/ only)
 │   ├── full_access_files.py # Unrestricted file read/write/delete (confirmed for writes/deletes)
+│   ├── file_index.py        # Whole-computer semantic file search + incremental indexer
 │   ├── system.py            # Shell commands + app launching (confirmed)
 │   ├── desktop_control.py   # Mouse/keyboard control (confirmed)
 │   └── web.py                # Web search (read-only, not confirmed)
