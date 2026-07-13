@@ -100,3 +100,4 @@ soundfile==0.13.1
 pyttsx3==2.99
 pyautogui==0.9.54
 ddgs==9.14.4
+python-docx==1.2.0
