@@ -21,6 +21,7 @@ from tools.system import SYSTEM_TOOL_SCHEMAS, SYSTEM_TOOL_FUNCTIONS, SYSTEM_RISK
 from tools.desktop_control import DESKTOP_TOOL_SCHEMAS, DESKTOP_TOOL_FUNCTIONS, DESKTOP_RISKY_TOOLS
 from tools.web import WEB_TOOL_SCHEMAS, WEB_TOOL_FUNCTIONS
 from tools.full_access_files import FULL_ACCESS_SCHEMAS, FULL_ACCESS_FUNCTIONS, FULL_ACCESS_RISKY_TOOLS
+from tools.file_index import FILE_INDEX_SCHEMAS, FILE_INDEX_FUNCTIONS
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +142,7 @@ TOOL_SCHEMAS += SYSTEM_TOOL_SCHEMAS
 TOOL_SCHEMAS += DESKTOP_TOOL_SCHEMAS
 TOOL_SCHEMAS += WEB_TOOL_SCHEMAS
 TOOL_SCHEMAS += FULL_ACCESS_SCHEMAS
+TOOL_SCHEMAS += FILE_INDEX_SCHEMAS
 
 TOOL_FUNCTIONS = {
     "get_current_time": get_current_time,
@@ -152,6 +154,7 @@ TOOL_FUNCTIONS.update(SYSTEM_TOOL_FUNCTIONS)
 TOOL_FUNCTIONS.update(DESKTOP_TOOL_FUNCTIONS)
 TOOL_FUNCTIONS.update(WEB_TOOL_FUNCTIONS)
 TOOL_FUNCTIONS.update(FULL_ACCESS_FUNCTIONS)
+TOOL_FUNCTIONS.update(FILE_INDEX_FUNCTIONS)
 
 # Tools that change or affect something beyond Jarvis's own sandbox --
 # brain/llm.py asks for confirmation before running any of these.
