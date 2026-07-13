@@ -78,6 +78,14 @@ Find files by what they're *about*, not just their name -- e.g. "find the PDF wh
 
 This is separate from the manual `ingest/ingest.py` knowledge base: that one is for documents you deliberately curate, this one is for finding *anything* on disk without ingesting it by hand first. Note there's no background file-watcher yet -- re-run `/index` when you want it to notice new or changed files.
 
+### Git integration
+
+Structured git tools instead of guessing the right flags through the generic command runner: `git_status`, `git_log`, `git_diff`, and `git_branch_list` run freely (read-only); `git_add`, `git_commit`, `git_checkout`, and `git_push` all ask for confirmation first, since git mistakes are often more annoying to undo than a file operation.
+
+### Planning
+
+For anything that looks like it needs more than one step (e.g. "create a Flask API, run it, test it, fix errors, commit"), Jarvis first sketches a short plan and shows it to you before touching any tools, then works through it step by step -- adjusting if a step's result changes what's needed, rather than following the plan blindly. Simple questions skip this and go straight to an answer. Each step gets printed live as it works.
+
 ## Vision
 
 The goal isn't a chatbot with some tools bolted on -- it's treating the whole computer as something you talk to. Not "open Explorer, search folders, open Chrome, copy files" but "find the PDF where I wrote about binary trees" and it just knows. Eventually the OS becomes the hardware layer and Jarvis becomes the interface.
@@ -87,16 +95,11 @@ The goal isn't a chatbot with some tools bolted on -- it's treating the whole co
 **Phase 1 — Foundation** ✅ *done*
 Offline LLM, local RAG, CLI, file indexing.
 
-**Phase 2 — File & system control** — *mostly done*
-- ✅ File manipulation (read/write/delete, sandboxed and unrestricted)
-- ✅ Open apps
-- ✅ Run terminal commands
-- ✅ Semantic file search — finds files by content/meaning across Documents/Desktop/Downloads via `/index` + `search_files`
-- ⬜ Git integration — no awareness of repos, branches, commits, or status yet.
+**Phase 2 — File & system control** ✅ *done*
+File manipulation (sandboxed and unrestricted), opening apps, running terminal commands, semantic file search, and structured git tools (status/log/diff/branch free, add/commit/checkout/push confirmed).
 
-**Phase 3 — Planning & reasoning** — *partially done*
-- ✅ Tool selection — the model already picks which tool to call per turn.
-- ⬜ Actual multi-step planning — right now each tool call is a reactive one-at-a-time decision (capped at 6 rounds), not an upfront plan for something like "create a Flask API, run it, test it, fix errors, commit." That style of task needs a planning layer on top of what exists.
+**Phase 3 — Planning & reasoning** ✅ *done*
+Tool selection (the model picks which tool to call per turn) plus an explicit planning step for multi-step tasks: a short plan is generated and shown before execution, then followed step by step with room to adapt if something unexpected happens. The round limit for a single request went from 6 to 15 to give multi-step tasks room to actually finish.
 
 **Phase 4 — Voice** ✅ *done*
 Speech input (`/voice`), offline recognition (faster-whisper), text-to-speech (`/speak on`). Not yet built: a wake word (currently opt-in per message via `/voice`, not always-listening).
@@ -128,6 +131,7 @@ Local-Jarvis/
 │   ├── file_manager.py     # Sandboxed file read/write/delete tools (workspace/ only)
 │   ├── full_access_files.py # Unrestricted file read/write/delete (confirmed for writes/deletes)
 │   ├── file_index.py        # Whole-computer semantic file search + incremental indexer
+│   ├── git_tools.py          # Structured git tools (status/log/diff/branch free, rest confirmed)
 │   ├── system.py            # Shell commands + app launching (confirmed)
 │   ├── desktop_control.py   # Mouse/keyboard control (confirmed)
 │   └── web.py                # Web search (read-only, not confirmed)
