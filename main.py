@@ -1,14 +1,17 @@
 from rich.console import Console
 from brain.llm import JarvisLLM
 from voice.voice import JarvisVoice
+from tools.file_index import index_files
 
 console = Console()
 
 HELP_TEXT = (
     "[dim]Jarvis can run commands, manage files anywhere, control your "
-    "mouse/keyboard, open apps, and search the web -- it will ask before "
-    "anything risky. Commands: /voice (or /voice N) to speak your message, "
-    "/speak on|off to toggle spoken replies, exit/quit to leave.[/dim]"
+    "mouse/keyboard, open apps, search the web, and semantically search "
+    "your indexed files -- it will ask before anything risky. Commands: "
+    "/index to (re)index Documents/Desktop/Downloads for search, /voice "
+    "(or /voice N) to speak your message, /speak on|off to toggle spoken "
+    "replies, exit/quit to leave.[/dim]"
 )
 
 
@@ -41,6 +44,19 @@ def main():
 
         if lowered.startswith("/speak") and lowered not in ("/speak on", "/speak off"):
             console.print("[dim]Usage: /speak on  or  /speak off[/dim]\n")
+            continue
+
+        if lowered == "/index":
+            console.print("[dim]Indexing Documents, Desktop, and Downloads -- this can take a while the first time...[/dim]")
+
+            def show_progress(msg):
+                console.print(f"[dim]{msg}[/dim]")
+
+            try:
+                summary = index_files(progress=show_progress)
+                console.print(f"[bold cyan]{summary}[/bold cyan]\n")
+            except Exception as e:
+                console.print(f"[bold red]Indexing failed: {e}[/bold red]\n")
             continue
 
         if lowered == "/voice" or lowered.startswith("/voice "):
