@@ -1,16 +1,18 @@
 from rich.console import Console
 from brain.llm import JarvisLLM
 from voice.voice import JarvisVoice
+from voice.wake_word import listen_for_wake_word
 from tools.file_index import index_files
 
 console = Console()
 
 HELP_TEXT = (
     "[dim]Jarvis can run commands, manage files anywhere, control your "
-    "mouse/keyboard, open apps, search the web, and semantically search "
-    "your indexed files -- it will ask before anything risky. Commands: "
-    "/index to (re)index Documents/Desktop/Downloads for search, /voice "
-    "(or /voice N) to speak your message, /speak on|off to toggle spoken "
+    "mouse/keyboard, open apps, search the web, read the screen, and "
+    "semantically search your indexed files -- it will ask before anything "
+    "risky. Commands: /index to (re)index Documents/Desktop/Downloads for "
+    "search, /voice (or /voice N) to speak your message, /wake to start "
+    "always-listening for \"Hey Jarvis\", /speak on|off to toggle spoken "
     "replies, exit/quit to leave.[/dim]"
 )
 
@@ -26,6 +28,22 @@ def show_step(message: str) -> None:
         console.print(f"[bold magenta]{message}[/bold magenta]")
     else:
         console.print(f"[dim]{message}[/dim]")
+
+
+def handle_message(jarvis: JarvisLLM, voice: JarvisVoice, text: str, speak_replies: bool) -> None:
+    """Send `text` to Jarvis and print (and optionally speak) the reply.
+
+    Shared by the normal typed-input loop and /wake mode, so a spoken
+    command triggered by the wake word goes through the exact same path
+    as a typed one.
+    """
+    try:
+        reply = jarvis.chat(text, on_step=show_step)
+        console.print(f"[bold blue]Jarvis >[/bold blue] {reply}\n")
+        if speak_replies:
+            voice.speak(reply)
+    except Exception as e:
+        console.print(f"[bold red]{e}[/bold red]\n")
 
 
 def main():
@@ -66,6 +84,31 @@ def main():
                 console.print(f"[bold red]Indexing failed: {e}[/bold red]\n")
             continue
 
+        if lowered == "/wake":
+            console.print("[dim]Listening for \"Hey Jarvis\"... (Ctrl+C to stop)[/dim]")
+            try:
+                while True:
+                    listen_for_wake_word()
+                    console.print("[bold green]Jarvis (wake) >[/bold green] Yes?")
+
+                    try:
+                        transcribed = voice.listen()
+                    except RuntimeError as e:
+                        console.print(f"[bold red]{e}[/bold red]\n")
+                        continue
+
+                    if not transcribed:
+                        console.print("[dim]Didn't catch anything -- listening for the wake word again...[/dim]\n")
+                        continue
+
+                    console.print(f"[bold green]You (voice) >[/bold green] {transcribed}")
+                    handle_message(jarvis, voice, transcribed, speak_replies)
+            except KeyboardInterrupt:
+                console.print("\n[dim]Stopped listening for the wake word.[/dim]\n")
+            except RuntimeError as e:
+                console.print(f"[bold red]{e}[/bold red]\n")
+            continue
+
         if lowered == "/voice" or lowered.startswith("/voice "):
             parts = stripped.split()
             duration = None
@@ -86,13 +129,7 @@ def main():
             console.print(f"[bold green]You (voice) >[/bold green] {transcribed}")
             user_input = transcribed
 
-        try:
-            reply = jarvis.chat(user_input, on_step=show_step)
-            console.print(f"[bold blue]Jarvis >[/bold blue] {reply}\n")
-            if speak_replies:
-                voice.speak(reply)
-        except Exception as e:
-            console.print(f"[bold red]{e}[/bold red]\n")
+        handle_message(jarvis, voice, user_input, speak_replies)
 
 
 if __name__ == "__main__":
