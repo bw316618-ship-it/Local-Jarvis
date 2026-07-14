@@ -103,3 +103,4 @@ ddgs==9.14.4
 python-docx==1.2.0
 openwakeword==0.4.0
 rapidocr-onnxruntime==1.4.4
+pyfiglet==1.0.4
