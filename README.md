@@ -59,9 +59,20 @@ Type `exit` or `quit` to end the session.
 ### Voice
 
 - `/voice` — record 6 seconds from your microphone and send it as your message (`/voice 10` records for 10 seconds instead)
+- `/wake` — always-listening mode: say "Hey Jarvis" and it'll prompt "Yes?" then record your command, same as `/voice` but hands-free. Press Ctrl+C to stop and return to typed input.
 - `/speak on` / `/speak off` — toggle whether Jarvis speaks its replies aloud (off by default)
 
-Both run fully locally: speech-to-text via faster-whisper, text-to-speech via your OS's built-in voices (SAPI5 on Windows). The first time you use `/voice`, it downloads a small Whisper model (~150 MB) and caches it -- expect a short delay only on that first use.
+Speech-to-text runs via faster-whisper, text-to-speech via your OS's built-in voices (SAPI5 on Windows), and the wake word via openWakeWord -- all fully local. The first time you use `/voice` or `/wake`, faster-whisper downloads a small model (~150 MB) and caches it; the wake-word model ships bundled in the package itself, no download needed.
+
+### Screen reading
+
+Jarvis can capture and read the screen via OCR (`rapidocr-onnxruntime`, no external OCR program like Tesseract required):
+
+- `read_screen_text` — see everything currently visible on screen as text
+- `find_text_on_screen` — locate a specific label (e.g. "Save", "Submit") and get its coordinates, meant to be paired with `mouse_click`
+- `take_screenshot` — save a PNG of the current screen
+
+All three are read-only, so none require confirmation. Worth knowing: this reads *text*, not layout or images -- Jarvis can find a button by its label but doesn't have general visual understanding of icons or graphics (that would need a vision-capable model, which isn't part of this setup).
 
 ### Full system access
 
@@ -102,11 +113,10 @@ File manipulation (sandboxed and unrestricted), opening apps, running terminal c
 Tool selection (the model picks which tool to call per turn) plus an explicit planning step for multi-step tasks: a short plan is generated and shown before execution, then followed step by step with room to adapt if something unexpected happens. The round limit for a single request went from 6 to 15 to give multi-step tasks room to actually finish.
 
 **Phase 4 — Voice** ✅ *done*
-Speech input (`/voice`), offline recognition (faster-whisper), text-to-speech (`/speak on`). Not yet built: a wake word (currently opt-in per message via `/voice`, not always-listening).
+Speech input (`/voice`), offline recognition (faster-whisper), text-to-speech (`/speak on`), and now always-listening wake word (`/wake`, "Hey Jarvis" via openWakeWord).
 
-**Phase 5 — Desktop automation** — *partially done*
-- ✅ Mouse, keyboard
-- ⬜ OCR, screenshot understanding — Jarvis can click and type, but can't yet *see* the screen to know what it's clicking on.
+**Phase 5 — Desktop automation** ✅ *done*
+Mouse and keyboard control, plus screen reading via OCR (`read_screen_text`, `find_text_on_screen`, `take_screenshot`) so Jarvis can find and click things by their visible label. Reads text only, not general visual/layout understanding -- that would need a vision-capable model, which isn't part of this setup.
 
 **Phase 6 — Long-term memory** — *not started*
 User preferences, learned habits, project history that persists across sessions. Currently there's only the RAG store (documents you've ingested) -- no memory of past conversations, decisions, or where you left off on something.
@@ -134,9 +144,11 @@ Local-Jarvis/
 │   ├── git_tools.py          # Structured git tools (status/log/diff/branch free, rest confirmed)
 │   ├── system.py            # Shell commands + app launching (confirmed)
 │   ├── desktop_control.py   # Mouse/keyboard control (confirmed)
+│   ├── screen.py             # Screenshots + OCR (read-only, not confirmed)
 │   └── web.py                # Web search (read-only, not confirmed)
 ├── voice/
-│   └── voice.py            # Local speech-to-text (faster-whisper) + text-to-speech (pyttsx3)
+│   ├── voice.py            # Local speech-to-text (faster-whisper) + text-to-speech (pyttsx3)
+│   └── wake_word.py         # "Hey Jarvis" wake-word detection (openWakeWord)
 ├── workspace/            # Sandbox folder file tools operate in (gitignored)
 └── requirements.txt
 ```
