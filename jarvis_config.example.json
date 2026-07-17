@@ -1,0 +1,12 @@
+{
+  "model": "llama3.1:8b",
+  "max_tool_rounds": 15,
+  "whisper_model": "base.en",
+  "voice_listen_seconds": 6,
+  "wake_word_threshold": 0.5,
+  "command_timeout_seconds": 30,
+  "index_roots": null,
+  "index_chunk_size": 500,
+  "index_chunk_overlap": 50,
+  "index_max_file_mb": 20
+}
