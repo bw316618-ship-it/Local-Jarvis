@@ -54,7 +54,19 @@ Run the assistant:
 python main.py
 ```
 
-Type `exit` or `quit` to end the session.
+Type `exit` or `quit` to end the session, or `/help` any time to see the full command list.
+
+### Configuration
+
+Defaults (model name, tool-call round limit, voice/wake-word settings, which folders get indexed, chunk sizes) live in `config.py`. To change any of them without editing code, copy `jarvis_config.example.json` to `jarvis_config.json` at the project root and set just the keys you want -- everything else keeps its default. `jarvis_config.json` is gitignored, so personal tweaks (a different Ollama model, custom indexed folders) don't get committed. Unknown keys and malformed JSON are warned about and ignored rather than crashing the app.
+
+### Audit log
+
+Every tool call -- what ran, when, the arguments, and whether it needed (and got) your confirmation -- is recorded to `memory/audit_log.jsonl`. Run `/log` to see the last 20 calls, or `/log 50` for more.
+
+### Saving a conversation
+
+`/save` writes the current session to a Markdown file under `transcripts/` (or `/save path/to/file.md` for a custom location). This is just an export for your own records -- it's not memory Jarvis reads back. Each `chat()` call still starts fresh aside from RAG/file-search context; the transcript doesn't make Jarvis remember today's conversation tomorrow (that's what Phase 6 will address).
 
 ### Voice
 
@@ -130,10 +142,14 @@ Proactive suggestions ("you search this folder daily, should I index it permanen
 Local-Jarvis/
 ├── start_jarvis.bat     # Windows double-click launcher
 ├── main.py              # CLI entry point / chat loop
+├── config.py             # Central config defaults + jarvis_config.json loader
+├── jarvis_config.example.json # Template -- copy to jarvis_config.json to override defaults
 ├── brain/
-│   └── llm.py            # Ollama LLM wrapper + tool-calling loop + confirmation gating
+│   └── llm.py            # Ollama LLM wrapper + tool-calling loop + confirmation gating + audit logging
 ├── memory/
-│   └── retriever.py       # ChromaDB-backed semantic search over manually-ingested docs
+│   ├── retriever.py       # ChromaDB-backed semantic search over manually-ingested docs
+│   ├── audit_log.py        # Records every tool call to memory/audit_log.jsonl
+│   └── transcript.py       # Session transcript tracking + /save export
 ├── ingest/
 │   └── ingest.py          # Manual document ingestion into the 'jarvis_memory' collection
 ├── tools/
@@ -150,5 +166,6 @@ Local-Jarvis/
 │   ├── voice.py            # Local speech-to-text (faster-whisper) + text-to-speech (pyttsx3)
 │   └── wake_word.py         # "Hey Jarvis" wake-word detection (openWakeWord)
 ├── workspace/            # Sandbox folder file tools operate in (gitignored)
+├── transcripts/          # Saved /save exports (gitignored)
 └── requirements.txt
 ```
