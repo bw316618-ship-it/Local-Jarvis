@@ -1,12 +1,14 @@
 from ollama import Client
 from memory.retriever import JarvisMemory
+from memory.audit_log import log_tool_call
 from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
+from config import CONFIG
 
 # Safety valve: caps how many tool-call round-trips happen for a single
 # user message. Raised from 6 -- genuinely multi-step tasks (create a
 # project, run it, fix errors, commit) need more turns than a quick
-# lookup does.
-MAX_TOOL_ROUNDS = 15
+# lookup does. Configurable via jarvis_config.json ("max_tool_rounds").
+MAX_TOOL_ROUNDS = CONFIG["max_tool_rounds"]
 
 
 def _default_confirm(name: str, arguments: dict) -> bool:
@@ -27,9 +29,9 @@ def _default_on_step(message: str) -> None:
 
 
 class JarvisLLM:
-    def __init__(self, model="llama3.1:8b", confirm_callback=None):
+    def __init__(self, model=None, confirm_callback=None):
         self.client = Client(host="http://localhost:11434")
-        self.model = model
+        self.model = model or CONFIG["model"]
         self.memory = JarvisMemory()
         self.confirm_callback = confirm_callback or _default_confirm
 
@@ -68,19 +70,27 @@ class JarvisLLM:
         if func is None:
             return f"Error: unknown tool '{name}'"
 
-        if name in RISKY_TOOLS:
+        is_risky = name in RISKY_TOOLS
+        approved = None
+
+        if is_risky:
             approved = self.confirm_callback(name, arguments)
             if not approved:
-                return (
+                result = (
                     f"The user declined to run '{name}'. Do not attempt this "
                     "exact action again or try to achieve the same outcome "
                     "another way without asking first."
                 )
+                log_tool_call(name, arguments, risky=True, approved=False, result=result)
+                return result
 
         try:
-            return str(func(**arguments))
+            result = str(func(**arguments))
         except Exception as e:
-            return f"Error running tool '{name}': {e}"
+            result = f"Error running tool '{name}': {e}"
+
+        log_tool_call(name, arguments, risky=is_risky, approved=approved, result=result)
+        return result
 
     def _make_plan(self, user_message: str) -> str:
         """Ask the model, with tools disabled, whether this request needs
