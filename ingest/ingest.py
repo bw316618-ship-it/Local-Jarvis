@@ -1,17 +1,21 @@
-print("RUNNING INGEST.PY")
 import sys
 import pathlib
 from pathlib import Path
+
+# ingest.py is meant to be run directly (`python ingest/ingest.py`), which
+# puts ingest/ itself -- not the project root -- on sys.path[0]. Without
+# this, `from config import CONFIG` below fails with ModuleNotFoundError
+# since Python can't find a top-level `config` module from inside ingest/.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 import chromadb
-import os
 
-print("Current working directory:", os.getcwd())
-print("This file:", __file__)
+from config import CONFIG
 
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
+CHUNK_SIZE = CONFIG["index_chunk_size"]
+CHUNK_OVERLAP = CONFIG["index_chunk_overlap"]
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "memory" / "chroma"
