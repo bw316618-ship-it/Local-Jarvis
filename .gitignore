@@ -12,6 +12,12 @@ workspace/
 # Chroma database
 memory/chroma/
 
+# Personal data -- audit log, file-index state, saved transcripts, config
+memory/audit_log.jsonl
+memory/file_index_state.json
+transcripts/
+jarvis_config.json
+
 # Environment variables
 .env
 
