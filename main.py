@@ -9,6 +9,8 @@ from brain.llm import JarvisLLM
 from voice.voice import JarvisVoice
 from voice.wake_word import listen_for_wake_word
 from tools.file_index import index_files
+from memory.transcript import append_turn, save_transcript
+from memory.audit_log import read_recent
 
 console = Console()
 
@@ -18,6 +20,8 @@ COMMANDS = [
     ("/voice [N]", "Speak your message instead of typing it (optional N-second duration)"),
     ("/wake", "Always-listening mode -- say \"Hey Jarvis\" (Ctrl+C to stop)"),
     ("/speak on|off", "Toggle whether Jarvis speaks its replies aloud"),
+    ("/save [path]", "Save this session's transcript to a Markdown file"),
+    ("/log [n]", "Show the last n tool calls Jarvis has made (default 20)"),
     ("exit / quit", "End the session"),
 ]
 
@@ -72,23 +76,28 @@ def show_step(message: str) -> None:
         console.print(f"[dim]  \u2192 {message[len('Step: '):] if message.startswith('Step: ') else message}[/dim]")
 
 
-def handle_message(jarvis: JarvisLLM, voice: JarvisVoice, text: str, speak_replies: bool) -> None:
+def handle_message(jarvis: JarvisLLM, voice: JarvisVoice, text: str, speak_replies: bool, session_log: list) -> None:
     """Send `text` to Jarvis and print (and optionally speak) the reply.
 
     Shared by the normal typed-input loop and /wake mode, so a spoken
     command triggered by the wake word goes through the exact same path
-    as a typed one.
+    as a typed one. Also records both sides of the turn into `session_log`
+    for /save -- this is just an in-memory transcript for export, not
+    memory Jarvis itself uses; each chat() call still starts fresh.
     """
+    append_turn(session_log, "user", text)
     try:
         with console.status("[bold cyan]Thinking...[/bold cyan]", spinner="dots"):
             reply = jarvis.chat(text, on_step=show_step)
         console.print(Panel(Markdown(reply), title="[bold blue]Jarvis[/bold blue]", border_style="blue", expand=False))
         console.print()
+        append_turn(session_log, "jarvis", reply)
         if speak_replies:
             voice.speak(reply)
     except Exception as e:
         console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
         console.print()
+        append_turn(session_log, "jarvis", f"[error: {e}]")
 
 
 def main():
@@ -97,6 +106,7 @@ def main():
     jarvis = JarvisLLM(confirm_callback=confirm_tool_call)
     voice = JarvisVoice()
     speak_replies = False
+    session_log = []
 
     while True:
         user_input = console.input("[bold green]You[/bold green] [dim]\u203a[/dim] ")
@@ -109,6 +119,22 @@ def main():
 
         if lowered == "/help":
             print_help()
+            continue
+
+        if lowered == "/log" or lowered.startswith("/log "):
+            parts = stripped.split()
+            n = 20
+            if len(parts) == 2 and parts[1].isdigit():
+                n = int(parts[1])
+            console.print(Panel(read_recent(n), title="[bold cyan]Recent tool calls[/bold cyan]", border_style="cyan", expand=False))
+            console.print()
+            continue
+
+        if lowered == "/save" or lowered.startswith("/save "):
+            parts = stripped.split(maxsplit=1)
+            save_path = parts[1] if len(parts) == 2 else None
+            result = save_transcript(session_log, path=save_path)
+            console.print(f"[bold cyan]{result}[/bold cyan]\n")
             continue
 
         if lowered in ("/speak on", "/speak off"):
@@ -152,7 +178,7 @@ def main():
                         continue
 
                     console.print(f"[bold green]You (voice)[/bold green] \u203a {transcribed}")
-                    handle_message(jarvis, voice, transcribed, speak_replies)
+                    handle_message(jarvis, voice, transcribed, speak_replies, session_log)
             except KeyboardInterrupt:
                 console.print("\n[dim]Stopped listening for the wake word.[/dim]\n")
             except RuntimeError as e:
@@ -181,7 +207,7 @@ def main():
             console.print(f"[bold green]You (voice)[/bold green] \u203a {transcribed}")
             user_input = transcribed
 
-        handle_message(jarvis, voice, user_input, speak_replies)
+        handle_message(jarvis, voice, user_input, speak_replies, session_log)
         console.print(Rule(style="dim"))
 
 
