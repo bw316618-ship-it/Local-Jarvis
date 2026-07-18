@@ -66,7 +66,17 @@ Every tool call -- what ran, when, the arguments, and whether it needed (and got
 
 ### Saving a conversation
 
-`/save` writes the current session to a Markdown file under `transcripts/` (or `/save path/to/file.md` for a custom location). This is just an export for your own records -- it's not memory Jarvis reads back. Each `chat()` call still starts fresh aside from RAG/file-search context; the transcript doesn't make Jarvis remember today's conversation tomorrow (that's what Phase 6 will address).
+`/save` writes the current session to a Markdown file under `transcripts/` (or `/save path/to/file.md` for a custom location). This is just an export for your own records, not memory Jarvis reads back -- see the next section for that.
+
+### Long-term memory
+
+Jarvis remembers past conversations across sessions -- not by pasting the whole history into every prompt (the local model's context window is too small for that), but by semantically recalling the few most relevant past turns for whatever you're currently asking. Ask something like *"continue the authentication system"* and Jarvis checks whether an earlier session already covered what was decided.
+
+- Every turn (your message + Jarvis's reply) is automatically stored after each response -- no command needed.
+- Stored in a separate ChromaDB collection (`jarvis_conversations`) from the manual RAG store and the file index, so the three don't collide.
+- `/forget` permanently clears all stored conversation memory (asks for confirmation first -- this can't be undone).
+
+Worth knowing: every turn gets stored, including trivial ones ("what time is it?"), rather than trying to judge what's "important" -- semantic search naturally deprioritizes irrelevant entries at retrieval time, so this is mostly harmless, but it does mean the store grows indefinitely with no pruning yet. If that becomes noisy over long-term use, periodic summarization/pruning would be the natural next refinement.
 
 ### Voice
 
@@ -130,11 +140,11 @@ Speech input (`/voice`), offline recognition (faster-whisper), text-to-speech (`
 **Phase 5 — Desktop automation** ✅ *done*
 Mouse and keyboard control, plus screen reading via OCR (`read_screen_text`, `find_text_on_screen`, `take_screenshot`) so Jarvis can find and click things by their visible label. Reads text only, not general visual/layout understanding -- that would need a vision-capable model, which isn't part of this setup.
 
-**Phase 6 — Long-term memory** — *not started*
-User preferences, learned habits, project history that persists across sessions. Currently there's only the RAG store (documents you've ingested) -- no memory of past conversations, decisions, or where you left off on something.
+**Phase 6 — Long-term memory** ✅ *done*
+Every conversation turn is automatically stored and semantically recalled in future sessions, so Jarvis can pick up context from earlier work ("continue the authentication system") without you re-explaining it. `/forget` clears it all if needed. Not covered: explicit user-preference modeling or habit tracking as a distinct concept -- everything is stored uniformly as conversation turns, and habit *learning* specifically (noticing patterns and proactively acting on them) is Phase 7's job.
 
 **Phase 7 — Self-improvement** — *not started*
-Proactive suggestions ("you search this folder daily, should I index it permanently?", "this script has failed three times, want a fix?"). Needs Phase 6 first -- you can't notice patterns without memory of the past.
+Proactive suggestions ("you search this folder daily, should I index it permanently?", "this script has failed three times, want a fix?"). This is the one phase left -- and the only one that couldn't have started before now, since it depends on Phase 6's memory to notice patterns at all.
 
 ## Project structure
 
@@ -148,6 +158,7 @@ Local-Jarvis/
 │   └── llm.py            # Ollama LLM wrapper + tool-calling loop + confirmation gating + audit logging
 ├── memory/
 │   ├── retriever.py       # ChromaDB-backed semantic search over manually-ingested docs
+│   ├── conversation_memory.py # Long-term memory: stores + recalls past conversation turns
 │   ├── audit_log.py        # Records every tool call to memory/audit_log.jsonl
 │   └── transcript.py       # Session transcript tracking + /save export
 ├── ingest/
