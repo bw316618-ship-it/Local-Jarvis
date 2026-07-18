@@ -9,7 +9,7 @@ All three tools here are read-only (they only look at the screen, never
 change anything), so none are registered as risky. Worth knowing: this
 only reads TEXT on screen, not icons, images, or layout -- true visual
 understanding of arbitrary UI would need a vision-capable model, which
-Jarvis doesn't have configured (llama3.1:8b is text-only).
+Jarvis doesn't have configured (qwen3:8b is text-only).
 """
 
 import tempfile
