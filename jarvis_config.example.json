@@ -1,5 +1,5 @@
 {
-  "model": "llama3.1:8b",
+  "model": "qwen3:8b",
   "max_tool_rounds": 15,
   "whisper_model": "base.en",
   "voice_listen_seconds": 6,
