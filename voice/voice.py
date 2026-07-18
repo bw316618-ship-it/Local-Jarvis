@@ -17,13 +17,22 @@ mode -- only /voice and /speak fail, with a clear error explaining why.
 import os
 import tempfile
 
-DEFAULT_LISTEN_SECONDS = 6
+from config import CONFIG
+
+# Windows without Developer Mode (or without running as admin) can't create
+# symlinks, so huggingface_hub's model cache falls back to copying files
+# instead -- harmless (just slightly more disk space), but it prints a
+# scary-looking warning on every first use if left unset. setdefault() so
+# this doesn't override anything the user has explicitly configured.
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
+DEFAULT_LISTEN_SECONDS = CONFIG["voice_listen_seconds"]
 SAMPLE_RATE = 16000
 
 
 class JarvisVoice:
-    def __init__(self, whisper_model: str = "base.en"):
-        self._whisper_model_name = whisper_model
+    def __init__(self, whisper_model: str = None):
+        self._whisper_model_name = whisper_model or CONFIG["whisper_model"]
         self._stt_model = None
         self._tts_engine = None
 
