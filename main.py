@@ -11,6 +11,7 @@ from voice.wake_word import listen_for_wake_word
 from tools.file_index import index_files
 from memory.transcript import append_turn, save_transcript
 from memory.audit_log import read_recent
+from memory.conversation_memory import forget_all
 
 console = Console()
 
@@ -22,6 +23,7 @@ COMMANDS = [
     ("/speak on|off", "Toggle whether Jarvis speaks its replies aloud"),
     ("/save [path]", "Save this session's transcript to a Markdown file"),
     ("/log [n]", "Show the last n tool calls Jarvis has made (default 20)"),
+    ("/forget", "Permanently clear Jarvis's long-term conversation memory"),
     ("exit / quit", "End the session"),
 ]
 
@@ -128,6 +130,23 @@ def main():
                 n = int(parts[1])
             console.print(Panel(read_recent(n), title="[bold cyan]Recent tool calls[/bold cyan]", border_style="cyan", expand=False))
             console.print()
+            continue
+
+        if lowered == "/forget":
+            console.print(
+                Panel(
+                    "This permanently deletes everything Jarvis has learned from past "
+                    "conversations across all sessions. It cannot be undone.",
+                    title="[bold yellow]Confirm[/bold yellow]",
+                    border_style="yellow",
+                    expand=False,
+                )
+            )
+            answer = console.input("[bold yellow]Clear long-term memory?[/bold yellow] [y/N] > ").strip().lower()
+            if answer == "y":
+                console.print(f"[bold cyan]{forget_all()}[/bold cyan]\n")
+            else:
+                console.print("[dim]Cancelled.[/dim]\n")
             continue
 
         if lowered == "/save" or lowered.startswith("/save "):
