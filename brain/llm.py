@@ -1,6 +1,7 @@
 from ollama import Client
 from memory.retriever import JarvisMemory
 from memory.audit_log import log_tool_call
+from memory.conversation_memory import recall, remember_turn
 from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
 from config import CONFIG
 
@@ -39,6 +40,12 @@ class JarvisLLM:
             "You are Jarvis, a local-first AI assistant with broad access to "
             "my laptop, running mostly offline.\n"
             "You answer questions using the provided context when it's relevant.\n"
+            "You may also be given snippets of relevant past conversation from "
+            "earlier sessions -- use them for continuity (e.g. if asked to "
+            "'continue the authentication system', check whether a past turn "
+            "already covers what was decided or where things were left off), "
+            "but don't assume every snippet is relevant just because it's "
+            "present; ignore ones that don't actually help.\n"
             "You have tools to manage files, run system commands, control the "
             "mouse and keyboard, open applications, search the web, work with "
             "git repos, read text visible on screen, and semantically search "
@@ -128,11 +135,16 @@ class JarvisLLM:
         emit = on_step or _default_on_step
 
         context_chunks = self.memory.search(user_message)
-
         if context_chunks:
             context = "\n\n".join(context_chunks)
         else:
             context = "No relevant information was found in local memory."
+
+        past_turns = recall(user_message)
+        if past_turns:
+            past_context = "\n\n".join(past_turns)
+        else:
+            past_context = "No relevant past conversation found."
 
         messages = [
             {"role": "system", "content": self.system_prompt},
@@ -140,6 +152,7 @@ class JarvisLLM:
                 "role": "user",
                 "content": (
                     f"Context:\n{context}\n\n"
+                    f"Relevant past conversation (from earlier sessions):\n{past_context}\n\n"
                     f"Question:\n{user_message}"
                 ),
             },
@@ -153,6 +166,8 @@ class JarvisLLM:
             messages.append({"role": "assistant", "content": f"My plan:\n{plan_text}"})
             messages.append({"role": "user", "content": "Now carry out the plan, one tool call at a time."})
 
+        reply = None
+
         for _ in range(MAX_TOOL_ROUNDS):
             response = self.client.chat(
                 model=self.model,
@@ -164,7 +179,8 @@ class JarvisLLM:
             tool_calls = message.get("tool_calls")
 
             if not tool_calls:
-                return message["content"]
+                reply = message["content"]
+                break
 
             # Record the assistant's tool-call request, run each tool it
             # asked for (with confirmation for risky ones), and feed the
@@ -182,6 +198,10 @@ class JarvisLLM:
                     "content": result,
                 })
 
-        # Hit the round limit -- ask for a final answer without more tools.
-        final = self.client.chat(model=self.model, messages=messages)
-        return final["message"]["content"]
+        if reply is None:
+            # Hit the round limit -- ask for a final answer without more tools.
+            final = self.client.chat(model=self.model, messages=messages)
+            reply = final["message"]["content"]
+
+        remember_turn(user_message, reply)
+        return reply
