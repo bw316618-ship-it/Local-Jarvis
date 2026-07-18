@@ -80,6 +80,16 @@ Jarvis remembers past conversations across sessions -- not by pasting the whole 
 
 Worth knowing: every turn gets stored, including trivial ones ("what time is it?"), rather than trying to judge what's "important" -- semantic search naturally deprioritizes irrelevant entries at retrieval time, so this is mostly harmless, but it does mean the store grows indefinitely with no pruning yet. If that becomes noisy over long-term use, periodic summarization/pruning would be the natural next refinement.
 
+### Insights (proactive suggestions)
+
+Jarvis checks the audit log (and tracked folder sizes) for patterns worth mentioning -- without you having to ask:
+
+- A command or action that's **failed 3+ times recently** ("`run_command(...)` has failed 4 times -- want help debugging it?")
+- A search/lookup you've **repeated 3+ times recently** ("You've searched for X 3 times -- want this remembered as something to check automatically?"), scoped to a curated set of tools where repetition is actually meaningful (not flagged for trivial things like `calculate` or `get_current_time`)
+- A tracked folder (Documents/Desktop/Downloads by default) that's **grown by 500 MB+** since it was last checked
+
+This runs automatically once at startup (silently, if there's nothing worth saying) and any time via `/insights`. It's checked at natural touchpoints, not continuously monitored in the background -- Jarvis has no persistent background process (that's what system-tray mode would add, a bigger, separate undertaking). Pattern matching on repeated actions is exact-match on the tool and its arguments, not semantic, so "flask project" and "the flask project setup" won't be recognized as the same repeated interest yet.
+
 ### Voice
 
 - `/voice` — record 6 seconds from your microphone and send it as your message (`/voice 10` records for 10 seconds instead)
@@ -145,8 +155,10 @@ Mouse and keyboard control, plus screen reading via OCR (`read_screen_text`, `fi
 **Phase 6 — Long-term memory** ✅ *done*
 Every conversation turn is automatically stored and semantically recalled in future sessions, so Jarvis can pick up context from earlier work ("continue the authentication system") without you re-explaining it. `/forget` clears it all if needed. Not covered: explicit user-preference modeling or habit tracking as a distinct concept -- everything is stored uniformly as conversation turns, and habit *learning* specifically (noticing patterns and proactively acting on them) is Phase 7's job.
 
-**Phase 7 — Self-improvement** — *not started*
-Proactive suggestions ("you search this folder daily, should I index it permanently?", "this script has failed three times, want a fix?"). This is the one phase left -- and the only one that couldn't have started before now, since it depends on Phase 6's memory to notice patterns at all.
+**Phase 7 — Self-improvement** ✅ *done*
+`/insights` (and an automatic silent check at startup) surfaces proactive suggestions from patterns in the audit log: repeated failures, repeated searches/actions worth automating, and tracked-folder growth. This is "notice patterns using the data Phase 6 already logs," not autonomous action -- Jarvis surfaces suggestions and waits to be asked, it doesn't act on them itself. Checked at natural touchpoints (startup, `/insights`), not continuously monitored -- true background monitoring needs the same kind of persistent-process architecture that system-tray mode would require, which is its own separate undertaking. Pattern matching is exact-match on tool + arguments, not semantic, so near-duplicate phrasing ("flask project" vs. "the flask project setup") isn't recognized as the same repeated interest yet.
+
+All 7 original roadmap phases are now complete.
 
 ## Project structure
 
@@ -162,6 +174,7 @@ Local-Jarvis/
 │   ├── retriever.py       # ChromaDB-backed semantic search over manually-ingested docs
 │   ├── conversation_memory.py # Long-term memory: stores + recalls past conversation turns
 │   ├── audit_log.py        # Records every tool call to memory/audit_log.jsonl
+│   ├── insights.py          # Phase 7: pattern detection over the audit log -> /insights
 │   └── transcript.py       # Session transcript tracking + /save export
 ├── ingest/
 │   └── ingest.py          # Manual document ingestion into the 'jarvis_memory' collection

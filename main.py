@@ -12,12 +12,14 @@ from tools.file_index import index_files
 from memory.transcript import append_turn, save_transcript
 from memory.audit_log import read_recent
 from memory.conversation_memory import forget_all
+from memory.insights import get_suggestions
 
 console = Console()
 
 COMMANDS = [
     ("/help", "Show this command list"),
     ("/index", "(Re)index Documents/Desktop/Downloads for semantic file search"),
+    ("/insights", "Check for proactive suggestions based on recent activity"),
     ("/voice [N]", "Speak your message instead of typing it (optional N-second duration)"),
     ("/wake", "Always-listening mode -- say \"Hey Jarvis\" (Ctrl+C to stop)"),
     ("/speak on|off", "Toggle whether Jarvis speaks its replies aloud"),
@@ -26,6 +28,15 @@ COMMANDS = [
     ("/forget", "Permanently clear Jarvis's long-term conversation memory"),
     ("exit / quit", "End the session"),
 ]
+
+
+def show_insights(suggestions: list, title: str = "Noticed a few things") -> None:
+    if not suggestions:
+        console.print("[dim]Nothing stands out right now.[/dim]\n")
+        return
+    body = "\n\n".join(f"- {s}" for s in suggestions)
+    console.print(Panel(body, title=f"[bold cyan]{title}[/bold cyan]", border_style="cyan", expand=False))
+    console.print()
 
 
 def print_banner() -> None:
@@ -110,6 +121,13 @@ def main():
     speak_replies = False
     session_log = []
 
+    try:
+        startup_suggestions = get_suggestions()
+        if startup_suggestions:
+            show_insights(startup_suggestions, title="Noticed a few things")
+    except Exception:
+        pass  # startup should never fail because of an insights hiccup
+
     while True:
         user_input = console.input("[bold green]You[/bold green] [dim]\u203a[/dim] ")
         stripped = user_input.strip()
@@ -130,6 +148,10 @@ def main():
                 n = int(parts[1])
             console.print(Panel(read_recent(n), title="[bold cyan]Recent tool calls[/bold cyan]", border_style="cyan", expand=False))
             console.print()
+            continue
+
+        if lowered == "/insights":
+            show_insights(get_suggestions(), title="Insights")
             continue
 
         if lowered == "/forget":
