@@ -21,6 +21,9 @@ DEFAULTS = {
     # voice/voice.py
     "whisper_model": "base.en",
     "voice_listen_seconds": 6,
+    "voice_silence_seconds": 1.2,
+    "voice_max_wait_seconds": 6,
+    "voice_max_recording_seconds": 30,
     # voice/wake_word.py
     "wake_word_threshold": 0.5,
     # tools/system.py, tools/git_tools.py

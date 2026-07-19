@@ -76,9 +76,15 @@ Jarvis remembers past conversations across sessions -- not by pasting the whole 
 
 - Every turn (your message + Jarvis's reply) is automatically stored after each response -- no command needed.
 - Stored in a separate ChromaDB collection (`jarvis_conversations`) from the manual RAG store and the file index, so the three don't collide.
-- `/forget` permanently clears all stored conversation memory (asks for confirmation first -- this can't be undone).
+- `/forget` permanently clears all stored conversation memory *and* remembered facts (asks for confirmation first -- this can't be undone).
 
 Worth knowing: every turn gets stored, including trivial ones ("what time is it?"), rather than trying to judge what's "important" -- semantic search naturally deprioritizes irrelevant entries at retrieval time, so this is mostly harmless, but it does mean the store grows indefinitely with no pruning yet. If that becomes noisy over long-term use, periodic summarization/pruning would be the natural next refinement.
+
+**Remembered facts** are a separate, more structured layer on top of generic conversation memory -- for things like *"my manager is named Sarah"* or *"I prefer dark mode"* that deserve to be tracked as durable facts, not just buried in a chat log:
+
+- Jarvis calls `remember_fact` itself when something durable comes up in conversation (a person, a preference, a project detail) -- you don't need a special command, just tell it naturally.
+- `/memory` lists everything remembered so far; `/memory person` (or any category) filters to just that category.
+- Recalled facts are automatically included as context on every message, the same way past conversation turns are.
 
 ### Insights (proactive suggestions)
 
@@ -92,11 +98,11 @@ This runs automatically once at startup (silently, if there's nothing worth sayi
 
 ### Voice
 
-- `/voice` — record 6 seconds from your microphone and send it as your message (`/voice 10` records for 10 seconds instead)
-- `/wake` — always-listening mode: say "Hey Jarvis" and it'll prompt "Yes?" then record your command, same as `/voice` but hands-free. Press Ctrl+C to stop and return to typed input.
+- `/voice` — speak your message; recording starts when you talk and stops automatically after a short pause, no need to guess a duration (`/voice 10` still works if you want a fixed 10-second window instead)
+- `/wake` — always-listening mode: say "Hey Jarvis" and it'll prompt "Yes?" then record your command with the same natural pause-detection as `/voice`, hands-free. Press Ctrl+C to stop and return to typed input.
 - `/speak on` / `/speak off` — toggle whether Jarvis speaks its replies aloud (off by default)
 
-Speech-to-text runs via faster-whisper, text-to-speech via your OS's built-in voices (SAPI5 on Windows), and the wake word via openWakeWord -- all fully local. The first time you use `/voice` or `/wake`, faster-whisper downloads a small model (~150 MB) and caches it; the wake-word model ships bundled in the package itself, no download needed.
+Speech-to-text runs via faster-whisper, text-to-speech via your OS's built-in voices (SAPI5 on Windows), wake-word detection via openWakeWord, and the pause-detection uses the Silero VAD model openWakeWord already bundles -- all fully local, no extra install for the natural-cutoff behavior. The first time you use `/voice` or `/wake`, faster-whisper downloads a small model (~150 MB) and caches it; both the wake-word and VAD models ship bundled in the package itself, no download needed.
 
 ### Screen reading
 
@@ -108,11 +114,31 @@ Jarvis can capture and read the screen via OCR (`rapidocr-onnxruntime`, no exter
 
 All three are read-only, so none require confirmation. Worth knowing: this reads *text*, not layout or images -- Jarvis can find a button by its label but doesn't have general visual understanding of icons or graphics (that would need a vision-capable model, which isn't part of this setup).
 
+### Window control
+
+Beyond raw mouse/keyboard coordinates, Jarvis can find and control windows by title (via PyGetWindow):
+
+- `list_windows` — see what's currently open
+- `focus_window` — bring a window to the front by a substring of its title (e.g. "Chrome", "Visual Studio Code")
+- `minimize_window` / `close_window` — self-explanatory; `close_window` can lose unsaved work in that window, so it asks for confirmation, same as `minimize_window` and `focus_window`
+
+Only `list_windows` is read-only and unconfirmed. Worth knowing: **PyGetWindow only supports Windows and macOS, not Linux** -- on an unsupported OS these tools return a clear error instead of crashing anything else.
+
 ### Full system access
 
-Jarvis can now run shell commands, launch apps/files/URLs, control the mouse and keyboard, read/write/delete files anywhere on the machine, and search the web when a task needs current information.
+Jarvis can now run shell commands, launch apps/files/URLs, control the mouse and keyboard, read/write/delete/rename/move/organize files anywhere on the machine, and search the web when a task needs current information.
 
-**Every action that changes something on your machine asks for your confirmation first** -- Jarvis will show you exactly what it wants to run and wait for a yes/no. This covers: running commands, opening applications, clicking, typing, hotkeys, and writing or deleting files outside its own `workspace/` sandbox. Reads (files, directory listings, web search) run without asking, since they can't change anything.
+**Every action that changes something on your machine asks for your confirmation first** -- Jarvis will show you exactly what it wants to run and wait for a yes/no. This covers: running commands, opening applications, clicking, typing, hotkeys, focusing/minimizing/closing windows, and writing, deleting, renaming, moving, or organizing files outside its own `workspace/` sandbox. Reads (files, directory listings, web search, listing windows) run without asking, since they can't change anything.
+
+### Organizing files
+
+Beyond finding and reasoning over documents, Jarvis can act on them directly:
+
+- `rename_file` — rename a file in place
+- `move_file` — move a file into a folder (created automatically if it doesn't exist yet), optionally renaming it in the same step
+- `organize_directory` — sort every file directly inside a folder into subfolders by type (`images/`, `documents/`, `spreadsheets/`, `code/`, etc.) -- ask Jarvis to "organize my Downloads" and this is what runs. Only touches top-level files, so it won't re-shuffle something already organized into subfolders.
+
+All three ask for confirmation first, same as any other file change outside the sandbox.
 
 ### Semantic file search
 
@@ -172,7 +198,7 @@ Local-Jarvis/
 │   └── llm.py            # Ollama LLM wrapper + tool-calling loop + confirmation gating + audit logging
 ├── memory/
 │   ├── retriever.py       # ChromaDB-backed semantic search over manually-ingested docs
-│   ├── conversation_memory.py # Long-term memory: stores + recalls past conversation turns
+│   ├── conversation_memory.py # Long-term memory: conversation turns + structured remembered facts
 │   ├── audit_log.py        # Records every tool call to memory/audit_log.jsonl
 │   ├── insights.py          # Phase 7: pattern detection over the audit log -> /insights
 │   └── transcript.py       # Session transcript tracking + /save export
@@ -181,15 +207,17 @@ Local-Jarvis/
 ├── tools/
 │   ├── tools.py            # Central tool registry (schemas, functions, risky-tool set)
 │   ├── file_manager.py     # Sandboxed file read/write/delete tools (workspace/ only)
-│   ├── full_access_files.py # Unrestricted file read/write/delete (confirmed for writes/deletes)
+│   ├── full_access_files.py # Unrestricted file read/write/delete/rename/move/organize (confirmed)
 │   ├── file_index.py        # Whole-computer semantic file search + incremental indexer
 │   ├── git_tools.py          # Structured git tools (status/log/diff/branch free, rest confirmed)
 │   ├── system.py            # Shell commands + app launching (confirmed)
 │   ├── desktop_control.py   # Mouse/keyboard control (confirmed)
+│   ├── window_control.py     # Window list/focus/minimize/close via PyGetWindow (Windows/macOS only)
 │   ├── screen.py             # Screenshots + OCR (read-only, not confirmed)
+│   ├── memory_tools.py       # remember_fact tool wrapper (read-only from the system's perspective)
 │   └── web.py                # Web search (read-only, not confirmed)
 ├── voice/
-│   ├── voice.py            # Local speech-to-text (faster-whisper) + text-to-speech (pyttsx3)
+│   ├── voice.py            # Local speech-to-text (faster-whisper) + text-to-speech (pyttsx3) + VAD-based natural recording
 │   └── wake_word.py         # "Hey Jarvis" wake-word detection (openWakeWord)
 ├── workspace/            # Sandbox folder file tools operate in (gitignored)
 ├── transcripts/          # Saved /save exports (gitignored)

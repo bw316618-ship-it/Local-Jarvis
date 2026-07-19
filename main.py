@@ -11,7 +11,7 @@ from voice.wake_word import listen_for_wake_word
 from tools.file_index import index_files
 from memory.transcript import append_turn, save_transcript
 from memory.audit_log import read_recent
-from memory.conversation_memory import forget_all
+from memory.conversation_memory import forget_all, list_facts
 from memory.insights import get_suggestions
 
 console = Console()
@@ -20,12 +20,13 @@ COMMANDS = [
     ("/help", "Show this command list"),
     ("/index", "(Re)index Documents/Desktop/Downloads for semantic file search"),
     ("/insights", "Check for proactive suggestions based on recent activity"),
-    ("/voice [N]", "Speak your message instead of typing it (optional N-second duration)"),
+    ("/memory [category]", "List facts Jarvis has explicitly remembered about you"),
+    ("/voice [N]", "Speak your message -- stops automatically after a pause (or specify N seconds)"),
     ("/wake", "Always-listening mode -- say \"Hey Jarvis\" (Ctrl+C to stop)"),
     ("/speak on|off", "Toggle whether Jarvis speaks its replies aloud"),
     ("/save [path]", "Save this session's transcript to a Markdown file"),
     ("/log [n]", "Show the last n tool calls Jarvis has made (default 20)"),
-    ("/forget", "Permanently clear Jarvis's long-term conversation memory"),
+    ("/forget", "Permanently clear Jarvis's long-term conversation memory and facts"),
     ("exit / quit", "End the session"),
 ]
 
@@ -152,6 +153,19 @@ def main():
 
         if lowered == "/insights":
             show_insights(get_suggestions(), title="Insights")
+            continue
+
+        if lowered == "/memory" or lowered.startswith("/memory "):
+            parts = stripped.split(maxsplit=1)
+            category = parts[1] if len(parts) == 2 else None
+            facts = list_facts(category)
+            if facts:
+                body = "\n".join(f"- {f}" for f in facts)
+                title = f"Remembered facts{f' ({category})' if category else ''}"
+                console.print(Panel(body, title=f"[bold cyan]{title}[/bold cyan]", border_style="cyan", expand=False))
+            else:
+                console.print("[dim]Nothing remembered yet" + (f" under '{category}'." if category else ".") + "[/dim]")
+            console.print()
             continue
 
         if lowered == "/forget":
