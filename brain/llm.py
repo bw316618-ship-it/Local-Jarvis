@@ -1,7 +1,7 @@
 from ollama import Client
 from memory.retriever import JarvisMemory
 from memory.audit_log import log_tool_call
-from memory.conversation_memory import recall, remember_turn
+from memory.conversation_memory import recall, remember_turn, recall_facts
 from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
 from config import CONFIG
 
@@ -46,8 +46,17 @@ class JarvisLLM:
             "already covers what was decided or where things were left off), "
             "but don't assume every snippet is relevant just because it's "
             "present; ignore ones that don't actually help.\n"
-            "You have tools to manage files, run system commands, control the "
-            "mouse and keyboard, open applications, search the web, work with "
+            "You may also be given facts remembered from earlier sessions "
+            "(people, preferences, project details) -- treat these as things "
+            "you already know about the user. When the user tells you "
+            "something durable worth remembering long-term -- a person in "
+            "their life, a preference, a project detail, a decision -- call "
+            "remember_fact to store it. Don't call it for one-off trivia that "
+            "doesn't need to persist.\n"
+            "You have tools to manage files (including renaming, moving, and "
+            "organizing them into subfolders by type), run system commands, "
+            "control the mouse and keyboard, list/focus/minimize/close "
+            "windows by title, open applications, search the web, work with "
             "git repos, read text visible on screen, and semantically search "
             "files already indexed on this machine (search_files) -- use "
             "search_files, not just list_directory, when asked to find a file "
@@ -153,6 +162,12 @@ class JarvisLLM:
         else:
             past_context = "No relevant past conversation found."
 
+        known_facts = recall_facts(user_message)
+        if known_facts:
+            facts_context = "\n".join(known_facts)
+        else:
+            facts_context = "No relevant remembered facts found."
+
         messages = [
             {"role": "system", "content": self.system_prompt},
             {
@@ -160,6 +175,7 @@ class JarvisLLM:
                 "content": (
                     f"Context:\n{context}\n\n"
                     f"Relevant past conversation (from earlier sessions):\n{past_context}\n\n"
+                    f"Known facts about the user/their projects:\n{facts_context}\n\n"
                     f"Question:\n{user_message}"
                 ),
             },
