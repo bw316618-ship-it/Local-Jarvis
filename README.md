@@ -163,25 +163,25 @@ The goal isn't a chatbot with some tools bolted on -- it's treating the whole co
 
 ## Roadmap
 
-**Phase 1 — Foundation** ✅ *done*
+**Phase 1 — Foundation** *done*
 Offline LLM, local RAG, CLI, file indexing.
 
-**Phase 2 — File & system control** ✅ *done*
+**Phase 2 — File & system control** *done*
 File manipulation (sandboxed and unrestricted), opening apps, running terminal commands, semantic file search, and structured git tools (status/log/diff/branch free, add/commit/checkout/push confirmed).
 
-**Phase 3 — Planning & reasoning** ✅ *done*
+**Phase 3 — Planning & reasoning** *done*
 Tool selection (the model picks which tool to call per turn) plus an explicit planning step for multi-step tasks: a short plan is generated and shown before execution, then followed step by step with room to adapt if something unexpected happens. The round limit for a single request went from 6 to 15 to give multi-step tasks room to actually finish.
 
-**Phase 4 — Voice** ✅ *done*
+**Phase 4 — Voice** *done*
 Speech input (`/voice`), offline recognition (faster-whisper), text-to-speech (`/speak on`), and now always-listening wake word (`/wake`, "Hey Jarvis" via openWakeWord).
 
-**Phase 5 — Desktop automation** ✅ *done*
+**Phase 5 — Desktop automation** *done*
 Mouse and keyboard control, plus screen reading via OCR (`read_screen_text`, `find_text_on_screen`, `take_screenshot`) so Jarvis can find and click things by their visible label. Reads text only, not general visual/layout understanding -- that would need a vision-capable model, which isn't part of this setup.
 
-**Phase 6 — Long-term memory** ✅ *done*
+**Phase 6 — Long-term memory** *done*
 Every conversation turn is automatically stored and semantically recalled in future sessions, so Jarvis can pick up context from earlier work ("continue the authentication system") without you re-explaining it. `/forget` clears it all if needed. Not covered: explicit user-preference modeling or habit tracking as a distinct concept -- everything is stored uniformly as conversation turns, and habit *learning* specifically (noticing patterns and proactively acting on them) is Phase 7's job.
 
-**Phase 7 — Self-improvement** ✅ *done*
+**Phase 7 — Self-improvement** *done*
 `/insights` (and an automatic silent check at startup) surfaces proactive suggestions from patterns in the audit log: repeated failures, repeated searches/actions worth automating, and tracked-folder growth. This is "notice patterns using the data Phase 6 already logs," not autonomous action -- Jarvis surfaces suggestions and waits to be asked, it doesn't act on them itself. Checked at natural touchpoints (startup, `/insights`), not continuously monitored -- true background monitoring needs the same kind of persistent-process architecture that system-tray mode would require, which is its own separate undertaking. Pattern matching is exact-match on tool + arguments, not semantic, so near-duplicate phrasing ("flask project" vs. "the flask project setup") isn't recognized as the same repeated interest yet.
 
 All 7 original roadmap phases are now complete.
