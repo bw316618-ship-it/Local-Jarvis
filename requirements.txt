@@ -105,3 +105,4 @@ openwakeword==0.4.0
 rapidocr-onnxruntime==1.4.4
 pyfiglet==1.0.4
 pygetwindow==0.0.9
+psutil==7.2.2

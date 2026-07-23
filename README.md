@@ -17,6 +17,12 @@ Download this repo as a ZIP, extract it anywhere, and double-click **`start_jarv
 
 On the first run it will create a virtual environment and install dependencies automatically -- this can take a few minutes. Every run after that starts instantly. Make sure [Python 3.11](https://www.python.org/downloads/) and [Ollama](https://ollama.com) are installed first (the script will tell you if either is missing).
 
+## Quick start (macOS/Linux)
+
+Download this repo, extract it, and run **`./start_jarvis.sh`** from a terminal (same first-run behavior as the Windows launcher: creates a venv, installs dependencies, then starts instantly on every run after).
+
+If double-clicking it in Finder opens a text editor instead of running it, the executable bit was likely stripped during download/extraction -- run `chmod +x start_jarvis.sh` once, or just run `./start_jarvis.sh` from Terminal.
+
 ## Requirements
 
 - Python 3.11
@@ -96,6 +102,10 @@ Jarvis checks the audit log (and tracked folder sizes) for patterns worth mentio
 
 This runs automatically once at startup (silently, if there's nothing worth saying) and any time via `/insights`. It's checked at natural touchpoints, not continuously monitored in the background -- Jarvis has no persistent background process (that's what system-tray mode would add, a bigger, separate undertaking). Pattern matching on repeated actions is exact-match on the tool and its arguments, not semantic, so "flask project" and "the flask project setup" won't be recognized as the same repeated interest yet.
 
+### Real-time diagnostics
+
+`/status` gives a live at-a-glance snapshot: CPU and memory usage, disk usage, system uptime, and the top processes by memory or CPU (`system_status`/`top_processes` are also available as tools Jarvis can call on its own, e.g. if you ask "what's using all my memory?"). Read-only, via `psutil` -- no confirmation needed.
+
 ### Voice
 
 - `/voice` — speak your message; recording starts when you talk and stops automatically after a short pause, no need to guess a duration (`/voice 10` still works if you want a fixed 10-second window instead)
@@ -147,7 +157,9 @@ Find files by what they're *about*, not just their name -- e.g. "find the PDF wh
 - `/index` — (re)index your Documents, Desktop, and Downloads folders. Only new or changed files are processed each time, so it's cheap to run again later.
 - Once indexed, just ask normally -- e.g. "find my notes about the Flask project" -- and Jarvis calls `search_files` automatically.
 
-This is separate from the manual `ingest/ingest.py` knowledge base: that one is for documents you deliberately curate, this one is for finding *anything* on disk without ingesting it by hand first. Note there's no background file-watcher yet -- re-run `/index` when you want it to notice new or changed files.
+This is separate from the manual `ingest/ingest.py` knowledge base: that one is for documents you deliberately curate, this one is for finding *anything* on disk without ingesting it by hand first.
+
+Indexing batch-encodes and batch-stores each file's chunks in a single call rather than one round-trip per chunk, which is meaningfully faster for anything with a lot of chunks (a long PDF can easily have dozens). There's still no continuous background watcher -- true always-on file watching needs the same kind of persistent-process architecture that system-tray mode would require -- but Jarvis does check (cheaply, via file timestamps only, no actual re-indexing) whether anything's changed since your last `/index` and mentions it once at startup if so, so a stale index doesn't go unnoticed indefinitely.
 
 ### Git integration
 
@@ -163,37 +175,50 @@ The goal isn't a chatbot with some tools bolted on -- it's treating the whole co
 
 ## Roadmap
 
-**Phase 1 — Foundation** *done*
+**Phase 1 — Foundation** ✅ *done*
 Offline LLM, local RAG, CLI, file indexing.
 
-**Phase 2 — File & system control** *done*
+**Phase 2 — File & system control** ✅ *done*
 File manipulation (sandboxed and unrestricted), opening apps, running terminal commands, semantic file search, and structured git tools (status/log/diff/branch free, add/commit/checkout/push confirmed).
 
-**Phase 3 — Planning & reasoning** *done*
+**Phase 3 — Planning & reasoning** ✅ *done*
 Tool selection (the model picks which tool to call per turn) plus an explicit planning step for multi-step tasks: a short plan is generated and shown before execution, then followed step by step with room to adapt if something unexpected happens. The round limit for a single request went from 6 to 15 to give multi-step tasks room to actually finish.
 
-**Phase 4 — Voice** *done*
+**Phase 4 — Voice** ✅ *done*
 Speech input (`/voice`), offline recognition (faster-whisper), text-to-speech (`/speak on`), and now always-listening wake word (`/wake`, "Hey Jarvis" via openWakeWord).
 
-**Phase 5 — Desktop automation** *done*
+**Phase 5 — Desktop automation** ✅ *done*
 Mouse and keyboard control, plus screen reading via OCR (`read_screen_text`, `find_text_on_screen`, `take_screenshot`) so Jarvis can find and click things by their visible label. Reads text only, not general visual/layout understanding -- that would need a vision-capable model, which isn't part of this setup.
 
-**Phase 6 — Long-term memory** *done*
+**Phase 6 — Long-term memory** ✅ *done*
 Every conversation turn is automatically stored and semantically recalled in future sessions, so Jarvis can pick up context from earlier work ("continue the authentication system") without you re-explaining it. `/forget` clears it all if needed. Not covered: explicit user-preference modeling or habit tracking as a distinct concept -- everything is stored uniformly as conversation turns, and habit *learning* specifically (noticing patterns and proactively acting on them) is Phase 7's job.
 
-**Phase 7 — Self-improvement** *done*
+**Phase 7 — Self-improvement** ✅ *done*
 `/insights` (and an automatic silent check at startup) surfaces proactive suggestions from patterns in the audit log: repeated failures, repeated searches/actions worth automating, and tracked-folder growth. This is "notice patterns using the data Phase 6 already logs," not autonomous action -- Jarvis surfaces suggestions and waits to be asked, it doesn't act on them itself. Checked at natural touchpoints (startup, `/insights`), not continuously monitored -- true background monitoring needs the same kind of persistent-process architecture that system-tray mode would require, which is its own separate undertaking. Pattern matching is exact-match on tool + arguments, not semantic, so near-duplicate phrasing ("flask project" vs. "the flask project setup") isn't recognized as the same repeated interest yet.
 
 All 7 original roadmap phases are now complete.
+
+## Testing
+
+A pytest suite covers the highest-risk logic: confirmation gating (declined risky tools must never execute), the chat/planning flow, memory storage on every exit path, file-safety edge cases (the `move_file` bug below among them), incremental indexing, pattern detection, and config loading. It deliberately doesn't need the heavy runtime stack (Ollama, ChromaDB, sentence-transformers) installed -- those are mocked, so the suite stays fast and lightweight for contributors:
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+70 tests, runs in about a second. Verified clean in an isolated environment with only `requirements-dev.txt` installed -- no accidental dependency on the full runtime stack.
 
 ## Project structure
 
 ```
 Local-Jarvis/
 ├── start_jarvis.bat     # Windows double-click launcher
+├── start_jarvis.sh       # macOS/Linux launcher
 ├── main.py              # CLI entry point / chat loop
 ├── config.py             # Central config defaults + jarvis_config.json loader
 ├── jarvis_config.example.json # Template -- copy to jarvis_config.json to override defaults
+├── pytest.ini             # Test discovery config
 ├── brain/
 │   └── llm.py            # Ollama LLM wrapper + tool-calling loop + confirmation gating + audit logging
 ├── memory/
@@ -214,12 +239,15 @@ Local-Jarvis/
 │   ├── desktop_control.py   # Mouse/keyboard control (confirmed)
 │   ├── window_control.py     # Window list/focus/minimize/close via PyGetWindow (Windows/macOS only)
 │   ├── screen.py             # Screenshots + OCR (read-only, not confirmed)
+│   ├── diagnostics.py        # CPU/memory/disk/process stats via psutil (read-only) -> /status
 │   ├── memory_tools.py       # remember_fact tool wrapper (read-only from the system's perspective)
 │   └── web.py                # Web search (read-only, not confirmed)
 ├── voice/
 │   ├── voice.py            # Local speech-to-text (faster-whisper) + text-to-speech (pyttsx3) + VAD-based natural recording
 │   └── wake_word.py         # "Hey Jarvis" wake-word detection (openWakeWord)
+├── tests/                 # pytest suite -- see Testing section above
 ├── workspace/            # Sandbox folder file tools operate in (gitignored)
 ├── transcripts/          # Saved /save exports (gitignored)
-└── requirements.txt
+├── requirements.txt
+└── requirements-dev.txt   # Adds pytest + the few extra libs the test suite needs directly
 ```

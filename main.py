@@ -8,11 +8,12 @@ from rich.table import Table
 from brain.llm import JarvisLLM
 from voice.voice import JarvisVoice
 from voice.wake_word import listen_for_wake_word
-from tools.file_index import index_files
+from tools.file_index import index_files, count_pending_changes
 from memory.transcript import append_turn, save_transcript
 from memory.audit_log import read_recent
 from memory.conversation_memory import forget_all, list_facts
 from memory.insights import get_suggestions
+from tools.diagnostics import system_status, top_processes
 
 console = Console()
 
@@ -20,6 +21,7 @@ COMMANDS = [
     ("/help", "Show this command list"),
     ("/index", "(Re)index Documents/Desktop/Downloads for semantic file search"),
     ("/insights", "Check for proactive suggestions based on recent activity"),
+    ("/status", "Show current CPU, memory, disk, and top processes at a glance"),
     ("/memory [category]", "List facts Jarvis has explicitly remembered about you"),
     ("/voice [N]", "Speak your message -- stops automatically after a pause (or specify N seconds)"),
     ("/wake", "Always-listening mode -- say \"Hey Jarvis\" (Ctrl+C to stop)"),
@@ -129,6 +131,13 @@ def main():
     except Exception:
         pass  # startup should never fail because of an insights hiccup
 
+    try:
+        pending = count_pending_changes()
+        if pending:
+            console.print(f"[dim]{pending} file(s) have changed since your last /index -- run /index to keep search results fresh.[/dim]\n")
+    except Exception:
+        pass  # same -- a stale-check hiccup should never block startup
+
     while True:
         user_input = console.input("[bold green]You[/bold green] [dim]\u203a[/dim] ")
         stripped = user_input.strip()
@@ -153,6 +162,15 @@ def main():
 
         if lowered == "/insights":
             show_insights(get_suggestions(), title="Insights")
+            continue
+
+        if lowered == "/status":
+            try:
+                body = system_status() + "\n\n" + top_processes()
+                console.print(Panel(body, title="[bold cyan]System status[/bold cyan]", border_style="cyan", expand=False))
+            except Exception as e:
+                console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
+            console.print()
             continue
 
         if lowered == "/memory" or lowered.startswith("/memory "):
