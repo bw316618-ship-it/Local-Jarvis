@@ -24,20 +24,24 @@ import chromadb
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 
+from config import CONFIG
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "memory" / "chroma"
 STATE_PATH = BASE_DIR / "memory" / "file_index_state.json"
 
-CHUNK_SIZE = 500
-CHUNK_OVERLAP = 50
-MAX_FILE_MB = 20  # skip absurdly large files rather than choke on them
+CHUNK_SIZE = CONFIG["index_chunk_size"]
+CHUNK_OVERLAP = CONFIG["index_chunk_overlap"]
+MAX_FILE_MB = CONFIG["index_max_file_mb"]  # skip absurdly large files rather than choke on them
 
 TEXT_EXTENSIONS = {".txt", ".md", ".py", ".js", ".json", ".csv", ".log", ".yml", ".yaml", ".ini", ".cfg"}
 PDF_EXTENSIONS = {".pdf"}
 DOCX_EXTENSIONS = {".docx"}
 INDEXABLE_EXTENSIONS = TEXT_EXTENSIONS | PDF_EXTENSIONS | DOCX_EXTENSIONS
 
-DEFAULT_ROOTS = [
+# CONFIG["index_roots"] lets a user override which folders get indexed via
+# jarvis_config.json; None (the default) falls back to these three.
+DEFAULT_ROOTS = CONFIG["index_roots"] or [
     str(Path.home() / "Documents"),
     str(Path.home() / "Desktop"),
     str(Path.home() / "Downloads"),
@@ -137,6 +141,28 @@ def _iter_candidate_files(roots):
             yield path
 
 
+def count_pending_changes(directories=None) -> int:
+    """Count how many indexable files are new or changed since the last
+    /index run, without actually indexing them. Fast -- just filesystem
+    stat() calls, no text extraction or embedding -- so it's cheap enough
+    to run automatically at startup as a "your search index is a bit
+    stale" nudge, without the unpredictable delay a full re-index could
+    introduce if there happen to be a lot of changed files.
+    """
+    roots = directories or DEFAULT_ROOTS
+    state = _load_state()
+    pending = 0
+    for path in _iter_candidate_files(roots):
+        key = str(path.resolve())
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if state.get(key) != mtime:
+            pending += 1
+    return pending
+
+
 def index_files(directories=None, progress=None) -> str:
     """Index (or re-index changed) files under `directories` for semantic search.
 
@@ -178,13 +204,20 @@ def index_files(directories=None, progress=None) -> str:
             pass
 
         chunks = list(_chunk_text(text))
-        for idx, chunk in enumerate(chunks):
-            embedding = embedder.encode(chunk).tolist()
+        if chunks:
+            # Batch-encode and batch-add all of a file's chunks in one call
+            # each, rather than one encode()/add() round-trip per chunk --
+            # meaningfully faster for files with many chunks (a long PDF
+            # can easily have dozens), since both SentenceTransformer and
+            # ChromaDB are built to handle batches efficiently.
+            embeddings = embedder.encode(chunks).tolist()
+            ids = [f"{key}::{idx}" for idx in range(len(chunks))]
+            metadatas = [{"source": key, "filename": path.name} for _ in chunks]
             collection.add(
-                documents=[chunk],
-                embeddings=[embedding],
-                ids=[f"{key}::{idx}"],
-                metadatas=[{"source": key, "filename": path.name}],
+                documents=chunks,
+                embeddings=embeddings,
+                ids=ids,
+                metadatas=metadatas,
             )
 
         state[key] = mtime
