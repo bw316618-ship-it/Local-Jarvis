@@ -15,16 +15,20 @@ scratch every time.
 Both tools here are read-only from the perspective of your files (index_files
 only creates embeddings in Jarvis's own database; it never modifies
 anything on disk), so neither is registered as risky.
+
+The embedder and ChromaDB client come from memory/shared.py's singletons
+rather than being created here directly, so this doesn't load its own
+separate copy of the embedding model if memory/retriever.py or
+memory/conversation_memory.py already have.
 """
 
 import json
 from pathlib import Path
 
-import chromadb
 from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
 
 from config import CONFIG
+from memory.shared import get_embedder, get_client
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "memory" / "chroma"
@@ -53,18 +57,13 @@ SKIP_DIR_NAMES = {
     "$RECYCLE.BIN", "System Volume Information", ".cache",
 }
 
-_embedder = None
-
 
 def _get_embedder():
-    global _embedder
-    if _embedder is None:
-        _embedder = SentenceTransformer("all-MiniLM-L6-v2")
-    return _embedder
+    return get_embedder()
 
 
 def _get_collection():
-    client = chromadb.PersistentClient(path=str(DB_PATH))
+    client = get_client()
     return client.get_or_create_collection("jarvis_files")
 
 

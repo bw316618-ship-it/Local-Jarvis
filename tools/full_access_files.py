@@ -70,25 +70,6 @@ def delete_any_file(path: str) -> str:
         return f"Could not delete '{path}': {e}"
 
 
-def delete_any_file(path: str) -> str:
-    """Delete a single file anywhere on the machine. Refuses directories."""
-    try:
-        target = Path(path).expanduser().resolve()
-    except Exception as e:
-        return f"Invalid path '{path}': {e}"
-
-    if not target.exists():
-        return f"'{path}' does not exist."
-    if target.is_dir():
-        return f"'{path}' is a directory -- refusing to delete directories."
-
-    try:
-        target.unlink()
-        return f"Deleted '{target}'."
-    except Exception as e:
-        return f"Could not delete '{path}': {e}"
-
-
 def rename_file(path: str, new_name: str) -> str:
     """Rename a file in place -- same directory, new filename."""
     try:
