@@ -1,29 +1,13 @@
-from pathlib import Path
-import os
-
-import chromadb
-from sentence_transformers import SentenceTransformer
+from memory.shared import get_embedder, get_client
 
 
 class JarvisMemory:
     def __init__(self):
-        # Project root (jarvis/)
-        BASE_DIR = Path(__file__).resolve().parent.parent
-
-        # Absolute database path
-        DB_PATH = BASE_DIR / "memory" / "chroma"
-
-        print(f"Retriever CWD: {os.getcwd()}")
-        print(f"Retriever file: {__file__}")
-        print(f"Database path: {DB_PATH}")
-
-        self.embedder = SentenceTransformer("all-MiniLM-L6-v2")
-
-        self.client = chromadb.PersistentClient(
-            path=str(DB_PATH)
-        )
-
-        print("Collections:", self.client.list_collections())
+        # Both the embedder and the ChromaDB client are shared singletons
+        # (see memory/shared.py) so this doesn't load its own separate
+        # copy of the embedding model if another module already has.
+        self.embedder = get_embedder()
+        self.client = get_client()
 
         # get_or_create_collection avoids a crash on first run, before
         # ingest.py has ever been executed and the collection exists.

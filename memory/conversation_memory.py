@@ -19,13 +19,21 @@ Both use the same retrieval pattern as the other memory stores: semantic
 search (the top few relevant entries for whatever you're asking now), not
 a full dump -- the local model's context window is too small for that,
 and most stored history wouldn't be relevant to the current question.
+
+The embedder and ChromaDB client are shared singletons from
+memory/shared.py -- see that module's docstring for why. forget_all() is
+the one exception: it opens its own PersistentClient directly rather than
+going through the shared one, since it's a rare, destructive operation
+(deleting whole collections) and there's no benefit to sharing a
+long-lived client for that.
 """
 
 from datetime import datetime, timezone
 from pathlib import Path
 
 import chromadb
-from sentence_transformers import SentenceTransformer
+
+from memory.shared import get_embedder, get_client
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "memory" / "chroma"
@@ -36,23 +44,18 @@ MAX_REPLY_CHARS_STORED = 600  # keep stored entries compact
 DEFAULT_RECALL_K = 3
 DEFAULT_FACTS_RECALL_K = 3
 
-_embedder = None
-
 
 def _get_embedder():
-    global _embedder
-    if _embedder is None:
-        _embedder = SentenceTransformer("all-MiniLM-L6-v2")
-    return _embedder
+    return get_embedder()
 
 
 def _get_collection():
-    client = chromadb.PersistentClient(path=str(DB_PATH))
+    client = get_client()
     return client.get_or_create_collection(COLLECTION_NAME)
 
 
 def _get_facts_collection():
-    client = chromadb.PersistentClient(path=str(DB_PATH))
+    client = get_client()
     return client.get_or_create_collection(FACTS_COLLECTION_NAME)
 
 
@@ -169,7 +172,13 @@ def list_facts(category: str = None) -> list:
 
 
 def forget_all() -> str:
-    """Permanently clear all stored conversation memory and facts."""
+    """Permanently clear all stored conversation memory and facts.
+
+    Uses its own PersistentClient rather than the shared one from
+    memory/shared.py -- this is a rare, destructive operation (dropping
+    whole collections), and there's no benefit to routing it through the
+    same long-lived client instance everything else shares.
+    """
     try:
         client = chromadb.PersistentClient(path=str(DB_PATH))
         for name in (COLLECTION_NAME, FACTS_COLLECTION_NAME):
