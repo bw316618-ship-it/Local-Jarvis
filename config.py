@@ -34,6 +34,7 @@ DEFAULTS = {
     "index_chunk_size": 500,
     "index_chunk_overlap": 50,
     "index_max_file_mb": 20,
+    "piper_voice_model": "voices/en_US-amy-medium.onnx",
 }
 
 
