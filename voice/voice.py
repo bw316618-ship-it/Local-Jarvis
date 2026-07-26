@@ -2,10 +2,25 @@
 Voice I/O for Jarvis.
 
 Speech-to-text runs locally via faster-whisper (a CTranslate2 port of
-OpenAI's Whisper). Text-to-speech runs locally via pyttsx3, which drives
-the OS's built-in voices (SAPI5 on Windows). Neither sends audio or
-transcripts anywhere -- consistent with the rest of Jarvis running fully
-offline.
+OpenAI's Whisper). Text-to-speech runs locally via Piper (a fast neural
+TTS engine, ONNX-based) -- swapped in for the earlier pyttsx3 engine,
+which drove the OS's built-in voices (SAPI5 on Windows) and sounded
+noticeably more robotic/dated by comparison, on top of being platform-
+dependent in what voices are even available. Piper ships its own voice
+models instead, so quality and available voices are the same on every
+platform. Neither sends audio or transcripts anywhere -- consistent with
+the rest of Jarvis running fully offline.
+
+Piper voice models aren't bundled (they're a model download, not a
+Python package) -- download a voice's .onnx + .onnx.json pair from
+https://github.com/rhasspy/piper/blob/master/VOICES.md and place both
+files in a voices/ folder at the project root. Point CONFIG
+["piper_voice_model"] (jarvis_config.json) at the .onnx file's path,
+relative to the project root, if you want something other than the
+default. The sample rate a voice plays back at is read straight from its
+own config.json (via PiperVoice.config.sample_rate) rather than
+hardcoded, so switching voice models never requires also updating a
+separate playback-rate constant to match.
 
 Recording is silence-based by default: listen() starts capturing once it
 hears speech and stops automatically after a pause, via the Silero VAD
@@ -16,13 +31,15 @@ you know you'll need more time regardless of pauses.
 
 Imports for the audio/ML libraries are deferred to inside the methods
 rather than the top of this file. That way, if sounddevice, faster-whisper,
-or pyttsx3 fail to install or load (e.g. no microphone, no speakers, a
-headless machine), the rest of Jarvis still starts and works in text-only
-mode -- only /voice and /speak fail, with a clear error explaining why.
+or piper fail to install or load (e.g. no microphone, no speakers, a
+headless machine, no voice model downloaded yet), the rest of Jarvis
+still starts and works in text-only mode -- only /voice and /speak fail,
+with a clear error explaining why.
 """
 
 import os
 import tempfile
+from pathlib import Path
 
 from config import CONFIG
 
@@ -33,18 +50,22 @@ from config import CONFIG
 # this doesn't override anything the user has explicitly configured.
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+VOICES_DIR = BASE_DIR / "voices"
+
 DEFAULT_LISTEN_SECONDS = CONFIG["voice_listen_seconds"]
-SAMPLE_RATE = 16000
+SAMPLE_RATE = 16000  # mic input rate for STT/VAD -- independent of Piper's output rate
 
 VAD_FRAME_SIZE = 480  # 30ms @ 16kHz -- Silero VAD's recommended frame size
 VAD_SPEECH_THRESHOLD = 0.5
 
 
 class JarvisVoice:
-    def __init__(self, whisper_model: str = None):
+    def __init__(self, whisper_model: str = None, piper_voice_model: str = None):
         self._whisper_model_name = whisper_model or CONFIG["whisper_model"]
+        self._piper_model_name = piper_voice_model or CONFIG["piper_voice_model"]
         self._stt_model = None
-        self._tts_engine = None
+        self._tts_voice = None
         self._vad = None
 
     def _get_stt_model(self):
@@ -63,26 +84,37 @@ class JarvisVoice:
             )
         return self._stt_model
 
-    def _get_tts_engine(self):
-        if self._tts_engine is None:
+    def _get_tts_voice(self):
+        if self._tts_voice is None:
             try:
-                import pyttsx3
-            except (ImportError, OSError) as e:
+                from piper import PiperVoice
+            except ImportError as e:
                 raise RuntimeError(
-                    "Text-to-speech isn't available: pyttsx3 is not "
-                    "installed or failed to load. Run: pip install -r requirements.txt"
+                    "Text-to-speech isn't available: the piper-tts package "
+                    "is not installed. Run: pip install -r requirements.txt"
                 ) from e
 
+            model_path = (BASE_DIR / self._piper_model_name).resolve()
+            if not model_path.exists():
+                raise RuntimeError(
+                    f"Text-to-speech isn't available: voice model "
+                    f"'{model_path}' not found. Download a Piper voice "
+                    "(.onnx + .onnx.json) from "
+                    "https://github.com/rhasspy/piper/blob/master/VOICES.md, "
+                    "place both files in the 'voices/' folder, and set "
+                    "\"piper_voice_model\" in jarvis_config.json if the "
+                    "filename differs from the default."
+                )
+
             try:
-                self._tts_engine = pyttsx3.init()
+                print("Loading text-to-speech voice (first use only)...")
+                self._tts_voice = PiperVoice.load(str(model_path))
             except Exception as e:
                 raise RuntimeError(
-                    "Text-to-speech isn't available: the local speech engine "
-                    "failed to start. On Windows this uses the built-in SAPI5 "
-                    "voices and should work out of the box; check Windows "
-                    "Settings > Speech if this persists."
+                    f"Text-to-speech isn't available: could not load Piper "
+                    f"voice model '{model_path}': {e}"
                 ) from e
-        return self._tts_engine
+        return self._tts_voice
 
     def _get_vad(self):
         if self._vad is None:
@@ -218,9 +250,36 @@ class JarvisVoice:
         return self._listen_until_silence()
 
     def speak(self, text: str) -> None:
-        """Speak `text` aloud through the default speaker."""
+        """Speak `text` aloud through the default speaker, via Piper."""
         if not text:
             return
-        engine = self._get_tts_engine()
-        engine.say(text)
-        engine.runAndWait()
+
+        voice = self._get_tts_voice()
+
+        try:
+            import sounddevice as sd
+            import numpy as np
+        except (ImportError, OSError) as e:
+            raise RuntimeError(
+                "Text-to-speech isn't available: sounddevice couldn't load "
+                "(missing package, or no audio device found). Run: "
+                "pip install -r requirements.txt"
+            ) from e
+
+        try:
+            chunks = [
+                np.frombuffer(audio_chunk.audio_int16_bytes, dtype=np.int16)
+                for audio_chunk in voice.synthesize(text)
+            ]
+        except Exception as e:
+            raise RuntimeError(f"Piper failed to synthesize speech: {e}") from e
+
+        if not chunks:
+            return
+
+        audio = np.concatenate(chunks)
+        try:
+            sd.play(audio, samplerate=voice.config.sample_rate)
+            sd.wait()
+        except Exception as e:
+            raise RuntimeError(f"Could not play synthesized audio: {e}") from e
