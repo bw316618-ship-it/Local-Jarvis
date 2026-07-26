@@ -97,7 +97,7 @@ yarl==1.24.2
 faster-whisper==1.1.1
 sounddevice==0.5.1
 soundfile==0.13.1
-pyttsx3==2.99
+piper-tts
 pyautogui==0.9.54
 ddgs==9.14.4
 python-docx==1.2.0
