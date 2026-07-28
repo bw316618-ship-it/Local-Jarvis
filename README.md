@@ -259,6 +259,7 @@ Local-Jarvis/
 │   ├── diagnostics.py        # CPU/memory/disk/process stats via psutil (read-only) -> /status
 │   ├── memory_tools.py       # remember_fact tool wrapper (read-only from the system's perspective)
 │   └── web.py                # Web search (read-only, not confirmed)
+│   ├── vision.py             # Screen/image description via Ollama's moondream model (read-only)
 ├── voice/
 │   ├── voice.py            # Local speech-to-text (faster-whisper) + text-to-speech (pyttsx3) + VAD-based natural recording
 │   └── wake_word.py         # "Hey Jarvis" wake-word detection (openWakeWord)
