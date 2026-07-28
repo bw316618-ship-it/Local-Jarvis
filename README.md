@@ -27,6 +27,7 @@ If double-clicking it in Finder opens a text editor instead of running it, the e
 
 - Python 3.11
 - [Ollama](https://ollama.com) installed and running locally
+- [Ollama](https://ollama.com) installed and running locally, with `qwen3:8b` pulled (and optionally `moondream`, for image/screen description)
 
 ## Setup
 
@@ -108,11 +109,13 @@ This runs automatically once at startup (silently, if there's nothing worth sayi
 
 ### Voice
 
-- `/voice` — speak your message; recording starts when you talk and stops automatically after a short pause, no need to guess a duration (`/voice 10` still works if you want a fixed 10-second window instead)
+- `/voice` — speak your message; recording starts when you talk and stops automatically after a pause, no need to guess a duration (`/voice 10` still works if you want a fixed 10-second window instead)
 - `/wake` — always-listening mode: say "Hey Jarvis" and it'll prompt "Yes?" then record your command with the same natural pause-detection as `/voice`, hands-free. Press Ctrl+C to stop and return to typed input.
 - `/speak on` / `/speak off` — toggle whether Jarvis speaks its replies aloud (off by default)
 
-Speech-to-text runs via faster-whisper, text-to-speech via your OS's built-in voices (SAPI5 on Windows), wake-word detection via openWakeWord, and the pause-detection uses the Silero VAD model openWakeWord already bundles -- all fully local, no extra install for the natural-cutoff behavior. The first time you use `/voice` or `/wake`, faster-whisper downloads a small model (~150 MB) and caches it; both the wake-word and VAD models ship bundled in the package itself, no download needed.
+Speech-to-text runs via faster-whisper, text-to-speech via [Piper](https://github.com/rhasspy/piper) (a local neural TTS engine), wake-word detection via openWakeWord, and the pause-detection uses the Silero VAD model openWakeWord already bundles -- all fully local, no data leaves your machine. The first time you use `/voice` or `/wake`, faster-whisper downloads a small model (~150 MB) and caches it; the wake-word and VAD models ship bundled in the package itself, no download needed.
+
+**Piper setup (required for `/speak on`):** unlike the wake-word/VAD models, Piper voices aren't bundled -- download a voice's `.onnx` and `.onnx.json` pair from [Piper's voice list](https://github.com/rhasspy/piper/blob/master/VOICES.md) (e.g. `en_US-amy-medium`) and place both files in a `voices/` folder at the project root. This folder is gitignored since voice models can be tens of MB; `piper_voice_model` in `jarvis_config.json` lets you point at a different filename if you download something other than the default (`en_US-amy-medium.onnx`). Without a voice model present, `/speak on` fails with a clear error telling you what's missing -- everything else in Jarvis still works.
 
 ### Screen reading
 
@@ -123,6 +126,20 @@ Jarvis can capture and read the screen via OCR (`rapidocr-onnxruntime`, no exter
 - `take_screenshot` — save a PNG of the current screen
 
 All three are read-only, so none require confirmation. Worth knowing: this reads *text*, not layout or images -- Jarvis can find a button by its label but doesn't have general visual understanding of icons or graphics (that would need a vision-capable model, which isn't part of this setup).
+
+### Vision
+
+Beyond OCR (which only reads text that's literally rendered on screen), Jarvis can describe actual visual content -- photos, icons, layout, diagrams, colors -- via a local vision-language model:
+
+- `describe_image` — describe an image file, or (if no path is given) capture and describe the current screen, optionally answering a specific question about it (e.g. "is there a red car in this photo?")
+
+Runs through the same local Ollama server every other tool talks to, via the `moondream` model -- pull it once with:
+
+```bash
+ollama pull moondream
+```
+
+Read-only, so it never asks for confirmation. Worth knowing the distinction from screen reading: `read_screen_text`/`find_text_on_screen` know what text says, `describe_image` knows what things *look like* -- ask "what does my screen look like" or "what's in this photo" and Jarvis reaches for this instead of OCR.
 
 ### Window control
 
