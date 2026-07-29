@@ -53,18 +53,23 @@ class JarvisLLM:
             "their life, a preference, a project detail, a decision -- call "
             "remember_fact to store it. Don't call it for one-off trivia that "
             "doesn't need to persist.\n"
-            "You have tools to manage files (including renaming, moving, and "
-            "organizing them into subfolders by type), run system commands, "
-            "control the mouse and keyboard, list/focus/minimize/close "
-            "windows by title, open applications, search the web, work with "
-            "git repos, read text visible on screen, check system health "
+            "You have tools to manage files (including creating, renaming, "
+            "moving, and organizing them into subfolders by type), run "
+            "system commands, control the mouse and keyboard, list/focus/"
+            "minimize/close windows by title, open applications, search the "
+            "web, work with git repos, read text visible on screen, describe "
+            "images or the screen's visual content, check system health "
             "(CPU/memory/disk/top processes), and semantically search "
             "files already indexed on this machine (search_files) -- use "
             "search_files, not just list_directory, when asked to find a file "
-            "by what it's about rather than its exact name or location, and "
-            "use find_text_on_screen before mouse_click when you need to "
-            "click something by its visible label rather than a coordinate "
-            "you already know.\n"
+            "by what it's about rather than its exact name or location, use "
+            "find_text_on_screen before mouse_click when you need to click "
+            "something by its visible label rather than a coordinate you "
+            "already know, and use create_directory (never move_file or any "
+            "other workaround) when asked to make a new empty folder.\n"
+            "Always use the tool that's actually built for what's being asked "
+            "rather than improvising a workaround with a different tool -- if "
+            "no tool fits, say so plainly instead of forcing one to fit.\n"
             "Only call a tool when it's genuinely needed to answer accurately "
             "or complete a requested action. Greetings, small talk, opinions, "
             "thanks, and general knowledge you already know get a plain reply "
@@ -145,7 +150,16 @@ class JarvisLLM:
                 ),
             },
         ]
-        response = self.client.chat(model=self.model, messages=planning_messages)
+        # think=False: qwen3 is a hybrid reasoning model that generates a
+        # chain-of-thought by default before answering. That's pure overhead
+        # for a yes/no planning check, and for the main tool-calling loop
+        # it's actively counterproductive: reasoning tokens can end up as
+        # the *final* content instead of a real tool call (the model
+        # narrates "I should call X" in prose rather than emitting a
+        # tool_calls entry), which is what silently no-ops actions like
+        # "create a folder" instead of running them. Every chat() call in
+        # this file passes think=False for both speed and correctness.
+        response = self.client.chat(model=self.model, messages=planning_messages, think=False)
         return response["message"]["content"].strip()
 
     def chat(self, user_message: str, on_step=None) -> str:
@@ -197,6 +211,7 @@ class JarvisLLM:
                 model=self.model,
                 messages=messages,
                 tools=TOOL_SCHEMAS,
+                think=False,
             )
 
             message = response["message"]
@@ -224,7 +239,7 @@ class JarvisLLM:
 
         if reply is None:
             # Hit the round limit -- ask for a final answer without more tools.
-            final = self.client.chat(model=self.model, messages=messages)
+            final = self.client.chat(model=self.model, messages=messages, think=False)
             reply = final["message"]["content"]
 
         remember_turn(user_message, reply)
