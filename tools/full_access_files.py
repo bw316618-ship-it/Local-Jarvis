@@ -70,6 +70,26 @@ def delete_any_file(path: str) -> str:
         return f"Could not delete '{path}': {e}"
 
 
+def create_directory(path: str) -> str:
+    """Create a new empty folder (and any missing parent folders) anywhere
+    on the machine. Does nothing if it already exists as a directory."""
+    try:
+        target = Path(path).expanduser().resolve()
+    except Exception as e:
+        return f"Invalid path '{path}': {e}"
+
+    if target.exists():
+        if target.is_dir():
+            return f"'{target}' already exists."
+        return f"'{target}' already exists and is a file, not a directory -- refusing to overwrite it."
+
+    try:
+        target.mkdir(parents=True)
+        return f"Created directory '{target}'."
+    except Exception as e:
+        return f"Could not create '{path}': {e}"
+
+
 def rename_file(path: str, new_name: str) -> str:
     """Rename a file in place -- same directory, new filename."""
     try:
@@ -246,6 +266,25 @@ FULL_ACCESS_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "create_directory",
+            "description": (
+                "Create a new empty folder anywhere on the local machine, including any "
+                "missing parent folders. Use this for requests like 'create a folder "
+                "called X on my desktop' or 'make a new directory for this project' -- "
+                "this is the correct tool for that, not move_file or organize_directory."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Full or relative path of the folder to create, e.g. 'C:/Users/ironm/Desktop/test'."},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "rename_file",
             "description": "Rename a file in place, keeping it in the same folder but giving it a new filename.",
             "parameters": {
@@ -300,9 +339,10 @@ FULL_ACCESS_FUNCTIONS = {
     "read_any_file": read_any_file,
     "write_any_file": write_any_file,
     "delete_any_file": delete_any_file,
+    "create_directory": create_directory,
     "rename_file": rename_file,
     "move_file": move_file,
     "organize_directory": organize_directory,
 }
 
-FULL_ACCESS_RISKY_TOOLS = {"write_any_file", "delete_any_file", "rename_file", "move_file", "organize_directory"}
+FULL_ACCESS_RISKY_TOOLS = {"write_any_file", "delete_any_file", "create_directory", "rename_file", "move_file", "organize_directory"}
