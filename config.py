@@ -17,6 +17,7 @@ USER_CONFIG_PATH = BASE_DIR / "jarvis_config.json"
 DEFAULTS = {
     # brain/llm.py
     "model": "qwen3:4b",
+    "num_ctx": 8192,
     "max_tool_rounds": 15,
     # voice/voice.py
     "whisper_model": "base.en",
