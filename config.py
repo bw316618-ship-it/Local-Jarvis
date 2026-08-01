@@ -19,10 +19,7 @@ DEFAULTS = {
     "model": "qwen3:4b",
     "num_ctx": 8192,
     "max_tool_rounds": 15,
-<<<<<<< HEAD
     "short_term_turns": 6,     # NEW: how many recent (user, jarvis) turn pairs stay verbatim in context
-=======
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
     # voice/voice.py
     "whisper_model": "base.en",
     "voice_listen_seconds": 6,
