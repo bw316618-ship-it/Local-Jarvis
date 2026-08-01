@@ -17,6 +17,7 @@ memory/audit_log.jsonl
 memory/file_index_state.json
 transcripts/
 jarvis_config.json
+memory/folder_size_snapshot.json
 
 # Environment variables
 .env
