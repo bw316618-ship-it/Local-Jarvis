@@ -24,7 +24,7 @@ The goal isn't a chatbot with some tools bolted on but rather to make the whole 
 
 Download this repo as a ZIP, extract it anywhere, and double-click **`start_jarvis.bat`**.
 
-On the first run it will create a virtual environment and install dependencies automatically — this can take a few minutes. Every run after that starts instantly. Make sure [Python 3.11](https://www.python.org/downloads/) and [Ollama](https://ollama.com) are installed first (the script will tell you if either is missing).
+On the first run it will create a virtual environment and install dependencies automatically. This can take a few minutes. Every run after that starts instantly. Make sure [Python 3.11](https://www.python.org/downloads/) and [Ollama](https://ollama.com) are installed first (the script will tell you if either is missing).
 
 ## Quick start (macOS/Linux)
 
@@ -73,9 +73,9 @@ Type `exit` or `quit` to end the session, or `/help` any time to see the full co
 
 ### Configuration
 
-Defaults (model name, tool-call round limit, short-term memory window, voice/wake-word settings, which folders get indexed, chunk sizes) live in `config.py`. To change any of them without editing code, copy `jarvis_config.example.json` to `jarvis_config.json` at the project root and set just the keys you want — everything else keeps its default. `jarvis_config.json` is gitignored, so personal tweaks (a different Ollama model, custom indexed folders) don't get committed. Unknown keys and malformed JSON are warned about and ignored rather than crashing the app.
+Defaults (model name, tool-call round limit, short-term memory window, voice/wake-word settings, which folders get indexed, chunk sizes) live in `config.py`. To change any of them without editing code, copy `jarvis_config.example.json` to `jarvis_config.json` at the project root and set just the keys you want. Everything else keeps its default. `jarvis_config.json` is gitignored, so personal tweaks (a different Ollama model, custom indexed folders) don't get committed. Unknown keys and malformed JSON are warned about and ignored rather than crashing the app.
 
-**Why `qwen3:8b` instead of `llama3.1:8b`:** same size class and speed, but Qwen3 is trained specifically for tool calling and has a meaningfully lower rate of dropped/incorrect tool calls in independent benchmarks — directly relevant here, since Jarvis's entire tool-use loop depends on the model reliably deciding *whether* to call a tool, not just formatting the call correctly. `llama3.1:8b` still works fine if you'd rather use it (set `"model": "llama3.1:8b"` in `jarvis_config.json`) — it's the more battle-tested, more widely documented option, just no longer the sharper pick for this specific job.
+**Why `qwen3:8b` instead of `llama3.1:8b`:** same size class and speed, but Qwen3 is trained specifically for tool calling and has a meaningfully lower rate of dropped/incorrect tool calls in independent benchmarks which is directly relevant here, since Jarvis's entire tool-use loop depends on the model reliably deciding *whether* to call a tool, not just formatting the call correctly. `llama3.1:8b` still works fine if you'd rather use it (set `"model": "llama3.1:8b"` in `jarvis_config.json`) — it's the more battle-tested, more widely documented option, just no longer the sharper pick for this specific job.
 
 ### Responsiveness: streaming, short-term memory, and plan-skipping
 
