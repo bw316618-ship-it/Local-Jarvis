@@ -8,6 +8,12 @@ from config import CONFIG
 MAX_TOOL_ROUNDS = CONFIG["max_tool_rounds"]
 SHORT_TERM_TURNS = CONFIG["short_term_turns"]
 
+# Passed as `options` on every Ollama chat call -- previously defined in
+# config.py/jarvis_config.json but never actually wired through, so
+# overriding it had no effect. Kept as a module-level dict (not built fresh
+# per call) since it's the same on every request.
+_CHAT_OPTIONS = {"num_ctx": CONFIG["num_ctx"]}
+
 # Rough, cheap heuristic for "does this need a plan" -- avoids paying for a
 # whole extra model round-trip on every single message (greetings, quick
 # lookups, one-line commands). A false negative here just means a genuinely
@@ -177,7 +183,7 @@ class JarvisLLM:
             },
         ]
 
-        response = self.client.chat(model=self.model, messages=planning_messages)
+        response = self.client.chat(model=self.model, messages=planning_messages, options=_CHAT_OPTIONS)
         return response["message"]["content"].strip()
 
     def _stream_round(self, messages, tools, on_token=None, on_sentence=None):
@@ -197,7 +203,9 @@ class JarvisLLM:
         buffer = ""
         tool_calls = None
 
-        stream = self.client.chat(model=self.model, messages=messages, tools=tools, stream=True)
+        stream = self.client.chat(
+            model=self.model, messages=messages, tools=tools, stream=True, options=_CHAT_OPTIONS
+        )
         for chunk in stream:
             message = chunk["message"]
             delta = message.get("content") or ""
@@ -302,4 +310,3 @@ class JarvisLLM:
         remember_turn(user_message, reply)
         self._update_short_term(user_message, reply)
         return reply
-
