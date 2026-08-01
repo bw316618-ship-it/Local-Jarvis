@@ -14,7 +14,6 @@ from memory.audit_log import read_recent
 from memory.conversation_memory import forget_all, list_facts
 from memory.insights import get_suggestions
 from tools.diagnostics import system_status, top_processes
-from ui.pet_bridge import set_pet_state
 
 console = Console()
 
@@ -73,7 +72,6 @@ def print_help() -> None:
 
 
 def confirm_tool_call(name: str, arguments: dict) -> bool:
-    set_pet_state("waiting_confirmation", f"{name}({arguments})")
     console.print(
         Panel(
             f"{name}({arguments})",
@@ -244,9 +242,6 @@ def main():
                     console.print("[bold green]Jarvis (wake)[/bold green] \u203a Yes?")
 
                     try:
-
-                        set_pet_state("listening")
-
                         transcribed = voice.listen()
                     except RuntimeError as e:
                         console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
@@ -273,9 +268,6 @@ def main():
 
             try:
                 console.print("[dim]Listening...[/dim]")
-
-                set_pet_state("listening")
-
                 transcribed = voice.listen(duration) if duration else voice.listen()
             except RuntimeError as e:
                 console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
