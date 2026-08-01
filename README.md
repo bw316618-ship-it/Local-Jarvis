@@ -6,7 +6,7 @@ The goal isn't a chatbot with some tools bolted on but rather to make the whole 
 
 ## Features
 
-- Offline LLM via [Ollama](https://ollama.com) (`qwen3:8b` by default)
+- Offline LLM via [Ollama](https://ollama.com) (`qwen3:4b` by default)
 - **Streaming responses** — replies print and speak sentence-by-sentence as they're generated, not after the whole answer is ready
 - **Short-term conversation memory** — the last few turns of the current session ride along in every prompt, so vague follow-ups ("open it", "try that again", "make it louder") resolve against what just happened
 - A lightweight **plan-skip heuristic** — only genuinely multi-step requests pay for an extra planning round-trip; quick questions and one-line commands go straight to an answer
@@ -75,7 +75,7 @@ Type `exit` or `quit` to end the session, or `/help` any time to see the full co
 
 Defaults (model name, tool-call round limit, short-term memory window, voice/wake-word settings, which folders get indexed, chunk sizes) live in `config.py`. To change any of them without editing code, copy `jarvis_config.example.json` to `jarvis_config.json` at the project root and set just the keys you want. Everything else keeps its default. `jarvis_config.json` is gitignored, so personal tweaks (a different Ollama model, custom indexed folders) don't get committed. Unknown keys and malformed JSON are warned about and ignored rather than crashing the app.
 
-**Why `qwen3:8b` instead of `llama3.1:8b`:** same size class and speed, but Qwen3 is trained specifically for tool calling and has a meaningfully lower rate of dropped/incorrect tool calls in independent benchmarks which is directly relevant here, since Jarvis's entire tool-use loop depends on the model reliably deciding *whether* to call a tool, not just formatting the call correctly. `llama3.1:8b` still works fine if you'd rather use it (set `"model": "llama3.1:8b"` in `jarvis_config.json`) — it's the more battle-tested, more widely documented option, just no longer the sharper pick for this specific job.
+**Why `qwen3:4b` instead of `llama3.1:8b`:** same size class and speed, but Qwen3 is trained specifically for tool calling and has a meaningfully lower rate of dropped/incorrect tool calls in independent benchmarks which is directly relevant here, since Jarvis's entire tool-use loop depends on the model reliably deciding *whether* to call a tool, not just formatting the call correctly. `llama3.1:8b` still works fine if you'd rather use it (set `"model": "llama3.1:8b"` in `jarvis_config.json`) — it's the more battle-tested, more widely documented option, just no longer the sharper pick for this specific job.
 
 ### Responsiveness: streaming, short-term memory, and plan-skipping
 
