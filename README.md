@@ -1,8 +1,8 @@
 # Local-Jarvis
 
-A local, offline AI assistant built in Python — CLI-based, with retrieval-augmented generation (RAG) over your own documents, streaming voice-first responses, and broad control over your machine.
+A local, offline AI assistant built in Python that is CLI-based with retrieval-augmented generation (RAG) over your own documents, streaming voice-first responses, and broad control over your machine.
 
-The goal isn't a chatbot with some tools bolted on — it's treating the whole computer as something you talk to. Not "open Explorer, search folders, open Chrome, copy files" but "find the PDF where I wrote about binary trees" and it just knows. Eventually the OS becomes the hardware layer and Jarvis becomes the interface.
+The goal isn't a chatbot with some tools bolted on but rather to make the whole computer as something you talk to. Not "open Explorer, search folders, open Chrome, copy files" but "find the PDF where I wrote about binary trees" and it just knows. Eventually the OS becomes the hardware layer and Jarvis becomes the interface.
 
 ## Features
 
