@@ -110,10 +110,6 @@ def handle_message(jarvis: JarvisLLM, voice: JarvisVoice, text: str, speak_repli
         append_turn(session_log, "jarvis", reply)
     except Exception as e:
         console.print()
-
-            voice.speak(reply)
-    except Exception as e:
-
         console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
         console.print()
         append_turn(session_log, "jarvis", f"[error: {e}]")
