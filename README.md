@@ -272,8 +272,6 @@ Local-Jarvis/
 ├── voice/
 │   ├── voice.py            # Local speech-to-text (faster-whisper) + text-to-speech (Piper) + VAD-based natural recording + async speech queue + startup warm-up
 │   └── wake_word.py         # "Hey Jarvis" wake-word detection (openWakeWord)
-├── ui/
-│   └── pet_bridge.py        # Experimental desktop-companion bridge
 ├── tests/                 # pytest suite -- see Testing section above
 ├── workspace/            # Sandbox folder file tools operate in (gitignored)
 ├── transcripts/          # Saved /save exports (gitignored)
