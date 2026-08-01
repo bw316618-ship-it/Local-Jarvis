@@ -5,7 +5,6 @@ from memory.conversation_memory import recall, remember_turn, recall_facts
 from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
 from config import CONFIG
 
-<<<<<<< HEAD
 MAX_TOOL_ROUNDS = CONFIG["max_tool_rounds"]
 SHORT_TERM_TURNS = CONFIG["short_term_turns"]
 
@@ -31,29 +30,14 @@ def _looks_like_multi_step(message: str) -> bool:
 
 
 def _default_confirm(name: str, arguments: dict) -> bool:
-=======
-# Safety valve: caps how many tool-call round-trips happen for a single
-# user message. Raised from 6 -- genuinely multi-step tasks (create a
-# project, run it, fix errors, commit) need more turns than a quick
-# lookup does. Configurable via jarvis_config.json ("max_tool_rounds").
-MAX_TOOL_ROUNDS = CONFIG["max_tool_rounds"]
 
-
-def _default_confirm(name: str, arguments: dict) -> bool:
-    """Fallback confirmation prompt, used if the caller doesn't supply one.
-
-    Defaults to a plain input() prompt rather than auto-approving, since a
-    risky tool with no confirmation path at all would silently defeat the
-    whole point of RISKY_TOOLS.
-    """
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
     print(f"\nJarvis wants to run '{name}' with arguments: {arguments}")
     answer = input("Allow this? [y/N] ").strip().lower()
     return answer == "y"
 
 
 def _default_on_step(message: str) -> None:
-<<<<<<< HEAD
+
     print(message)
 
 
@@ -61,12 +45,7 @@ def _default_on_sentence(sentence: str) -> None:
     print(sentence, end=" ", flush=True)
 
 
-=======
-    """Fallback progress reporter, used if the caller doesn't supply one."""
-    print(message)
 
-
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
 class JarvisLLM:
     def __init__(self, model=None, confirm_callback=None):
         self.client = Client(host="http://localhost:11434")
@@ -74,7 +53,7 @@ class JarvisLLM:
         self.memory = JarvisMemory()
         self.confirm_callback = confirm_callback or _default_confirm
 
-<<<<<<< HEAD
+
         # Rolling short-term memory: the last few (user, jarvis) turns of
         # THIS session, kept verbatim in every prompt. This is deliberately
         # separate from memory/conversation_memory.py's semantic recall --
@@ -85,19 +64,17 @@ class JarvisLLM:
         # history rather than something retrieved.
         self.short_term = []
 
-=======
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
+
         self.system_prompt = (
             "You are Jarvis, a local-first AI assistant with broad access to "
             "my laptop, running mostly offline.\n"
             "You answer questions using the provided context when it's relevant.\n"
-<<<<<<< HEAD
+
             "The most recent turns of THIS conversation appear directly above "
             "as message history -- use them to resolve vague or pronoun-heavy "
             "follow-ups ('open it', 'make that louder', 'try again') against "
             "whatever was just discussed or just ran.\n"
-=======
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
+
             "You may also be given snippets of relevant past conversation from "
             "earlier sessions -- use them for continuity (e.g. if asked to "
             "'continue the authentication system', check whether a past turn "
@@ -111,7 +88,7 @@ class JarvisLLM:
             "their life, a preference, a project detail, a decision -- call "
             "remember_fact to store it. Don't call it for one-off trivia that "
             "doesn't need to persist.\n"
-<<<<<<< HEAD
+
             "You have tools to manage files (including renaming, moving, and "
             "organizing them into subfolders by type), run system commands, "
             "control the mouse and keyboard, list/focus/minimize/close "
@@ -124,25 +101,7 @@ class JarvisLLM:
             "use find_text_on_screen before mouse_click when you need to "
             "click something by its visible label rather than a coordinate "
             "you already know.\n"
-=======
-            "You have tools to manage files (including creating, renaming, "
-            "moving, and organizing them into subfolders by type), run "
-            "system commands, control the mouse and keyboard, list/focus/"
-            "minimize/close windows by title, open applications, search the "
-            "web, work with git repos, read text visible on screen, describe "
-            "images or the screen's visual content, check system health "
-            "(CPU/memory/disk/top processes), and semantically search "
-            "files already indexed on this machine (search_files) -- use "
-            "search_files, not just list_directory, when asked to find a file "
-            "by what it's about rather than its exact name or location, use "
-            "find_text_on_screen before mouse_click when you need to click "
-            "something by its visible label rather than a coordinate you "
-            "already know, and use create_directory (never move_file or any "
-            "other workaround) when asked to make a new empty folder.\n"
-            "Always use the tool that's actually built for what's being asked "
-            "rather than improvising a workaround with a different tool -- if "
-            "no tool fits, say so plainly instead of forcing one to fit.\n"
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
+
             "Only call a tool when it's genuinely needed to answer accurately "
             "or complete a requested action. Greetings, small talk, opinions, "
             "thanks, and general knowledge you already know get a plain reply "
@@ -154,12 +113,11 @@ class JarvisLLM:
             "greeting or something you can already answer. When a tool "
             "really is needed, actually call it rather than describing what "
             "you would do.\n"
-<<<<<<< HEAD
+
             "Keep replies concise and conversational, the way a sharp "
             "assistant speaking out loud would -- lead with the answer, skip "
             "preamble, expand only if the user actually needs the detail.\n"
-=======
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
+
             "Some tools require the user's explicit confirmation before they "
             "run. If one is declined, tell the user and suggest an alternative "
             "rather than trying to achieve the same thing a different way "
@@ -201,26 +159,10 @@ class JarvisLLM:
         return result
 
     def _make_plan(self, user_message: str) -> str:
-<<<<<<< HEAD
+
         planning_messages = [
             {"role": "system", "content": "You are planning, not executing. Do not call any tools here."},
-=======
-        """Ask the model, with tools disabled, whether this request needs
-        more than one step -- and if so, sketch a short plan.
 
-        This runs as a separate, tool-free call rather than folding planning
-        into the main loop, so the model can't short-circuit straight to a
-        tool call before thinking about the shape of the whole task. Simple
-        requests get "No plan needed" and skip straight past this.
-        """
-        planning_messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are planning, not executing. Do not call any tools here."
-                ),
-            },
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
             {
                 "role": "user",
                 "content": (
@@ -234,7 +176,7 @@ class JarvisLLM:
                 ),
             },
         ]
-<<<<<<< HEAD
+
         response = self.client.chat(model=self.model, messages=planning_messages)
         return response["message"]["content"].strip()
 
@@ -307,43 +249,7 @@ class JarvisLLM:
         messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(self.short_term)
         messages.append(
-=======
-        # think=False: qwen3 is a hybrid reasoning model that generates a
-        # chain-of-thought by default before answering. That's pure overhead
-        # for a yes/no planning check, and for the main tool-calling loop
-        # it's actively counterproductive: reasoning tokens can end up as
-        # the *final* content instead of a real tool call (the model
-        # narrates "I should call X" in prose rather than emitting a
-        # tool_calls entry), which is what silently no-ops actions like
-        # "create a folder" instead of running them. Every chat() call in
-        # this file passes think=False for both speed and correctness.
-        response = self.client.chat(model=self.model, messages=planning_messages, think=False)
-        return response["message"]["content"].strip()
 
-    def chat(self, user_message: str, on_step=None) -> str:
-        emit = on_step or _default_on_step
-
-        context_chunks = self.memory.search(user_message)
-        if context_chunks:
-            context = "\n\n".join(context_chunks)
-        else:
-            context = "No relevant information was found in local memory."
-
-        past_turns = recall(user_message)
-        if past_turns:
-            past_context = "\n\n".join(past_turns)
-        else:
-            past_context = "No relevant past conversation found."
-
-        known_facts = recall_facts(user_message)
-        if known_facts:
-            facts_context = "\n".join(known_facts)
-        else:
-            facts_context = "No relevant remembered facts found."
-
-        messages = [
-            {"role": "system", "content": self.system_prompt},
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
             {
                 "role": "user",
                 "content": (
@@ -352,7 +258,7 @@ class JarvisLLM:
                     f"Known facts about the user/their projects:\n{facts_context}\n\n"
                     f"Question:\n{user_message}"
                 ),
-<<<<<<< HEAD
+
             }
         )
 
@@ -364,23 +270,12 @@ class JarvisLLM:
                 emit(f"Plan:\n{plan_text}")
                 messages.append({"role": "assistant", "content": f"My plan:\n{plan_text}"})
                 messages.append({"role": "user", "content": "Now carry out the plan, one tool call at a time."})
-=======
-            },
-        ]
 
-        plan_text = self._make_plan(user_message)
-        has_plan = bool(plan_text) and "no plan needed" not in plan_text.lower()
-
-        if has_plan:
-            emit(f"Plan:\n{plan_text}")
-            messages.append({"role": "assistant", "content": f"My plan:\n{plan_text}"})
-            messages.append({"role": "user", "content": "Now carry out the plan, one tool call at a time."})
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
 
         reply = None
 
         for _ in range(MAX_TOOL_ROUNDS):
-<<<<<<< HEAD
+
             content, tool_calls = self._stream_round(messages, TOOL_SCHEMAS, on_token=on_token, on_sentence=on_sentence)
 
             if not tool_calls:
@@ -388,26 +283,7 @@ class JarvisLLM:
                 break
 
             messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
-=======
-            response = self.client.chat(
-                model=self.model,
-                messages=messages,
-                tools=TOOL_SCHEMAS,
-                think=False,
-            )
 
-            message = response["message"]
-            tool_calls = message.get("tool_calls")
-
-            if not tool_calls:
-                reply = message["content"]
-                break
-
-            # Record the assistant's tool-call request, run each tool it
-            # asked for (with confirmation for risky ones), and feed the
-            # results back for a follow-up turn.
-            messages.append(message)
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
 
             for tool_call in tool_calls:
                 name = tool_call["function"]["name"]
@@ -415,7 +291,7 @@ class JarvisLLM:
                 emit(f"Step: {name}({args})")
 
                 result = self._run_tool_call(tool_call)
-<<<<<<< HEAD
+
                 messages.append({"role": "tool", "content": result})
 
         if reply is None:
@@ -426,17 +302,4 @@ class JarvisLLM:
         remember_turn(user_message, reply)
         self._update_short_term(user_message, reply)
         return reply
-=======
-                messages.append({
-                    "role": "tool",
-                    "content": result,
-                })
 
-        if reply is None:
-            # Hit the round limit -- ask for a final answer without more tools.
-            final = self.client.chat(model=self.model, messages=messages, think=False)
-            reply = final["message"]["content"]
-
-        remember_turn(user_message, reply)
-        return reply
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
