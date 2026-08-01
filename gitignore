@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+venv/
+
+# Jarvis file-management sandbox
+workspace/
+
+# Chroma database
+memory/chroma/
+
+# Personal data -- audit log, file-index state, saved transcripts, config
+memory/audit_log.jsonl
+memory/file_index_state.json
+memory/folder_size_snapshot.json
+transcripts/
+jarvis_config.json
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log

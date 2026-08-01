@@ -38,9 +38,13 @@ with a clear error explaining why.
 """
 
 import os
+<<<<<<< HEAD
 import queue
 import tempfile
 import threading
+=======
+import tempfile
+>>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
 from pathlib import Path
 
 from config import CONFIG
@@ -69,6 +73,7 @@ class JarvisVoice:
         self._stt_model = None
         self._tts_voice = None
         self._vad = None
+<<<<<<< HEAD
         self._speech_queue = queue.Queue()
         self._speech_thread = None
 
@@ -106,6 +111,8 @@ class JarvisVoice:
             self._get_stt_model()
         except Exception:
             pass
+=======
+>>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
 
     def _get_stt_model(self):
         if self._stt_model is None:

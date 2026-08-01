@@ -14,7 +14,10 @@ from memory.audit_log import read_recent
 from memory.conversation_memory import forget_all, list_facts
 from memory.insights import get_suggestions
 from tools.diagnostics import system_status, top_processes
+<<<<<<< HEAD
 from ui.pet_bridge import set_pet_state
+=======
+>>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
 
 console = Console()
 
@@ -73,7 +76,10 @@ def print_help() -> None:
 
 
 def confirm_tool_call(name: str, arguments: dict) -> bool:
+<<<<<<< HEAD
     set_pet_state("waiting_confirmation", f"{name}({arguments})")
+=======
+>>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
     console.print(
         Panel(
             f"{name}({arguments})",
@@ -94,7 +100,11 @@ def show_step(message: str) -> None:
         console.print(f"[dim]  \u2192 {message[len('Step: '):] if message.startswith('Step: ') else message}[/dim]")
 
 
+<<<<<<< HEAD
 '''def handle_message(jarvis: JarvisLLM, voice: JarvisVoice, text: str, speak_replies: bool, session_log: list) -> None:
+=======
+def handle_message(jarvis: JarvisLLM, voice: JarvisVoice, text: str, speak_replies: bool, session_log: list) -> None:
+>>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
     """Send `text` to Jarvis and print (and optionally speak) the reply.
 
     Shared by the normal typed-input loop and /wake mode, so a spoken
@@ -105,13 +115,17 @@ def show_step(message: str) -> None:
     """
     append_turn(session_log, "user", text)
     try:
+<<<<<<< HEAD
         set_pet_state("thinking")
+=======
+>>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
         with console.status("[bold cyan]Thinking...[/bold cyan]", spinner="dots"):
             reply = jarvis.chat(text, on_step=show_step)
         console.print(Panel(Markdown(reply), title="[bold blue]Jarvis[/bold blue]", border_style="blue", expand=False))
         console.print()
         append_turn(session_log, "jarvis", reply)
         if speak_replies:
+<<<<<<< HEAD
             set_pet_state("speaking", reply)
             voice.speak(reply)
             set_pet_state("idle")
@@ -139,6 +153,10 @@ def handle_message(jarvis: JarvisLLM, voice: JarvisVoice, text: str, speak_repli
         append_turn(session_log, "jarvis", reply)
     except Exception as e:
         console.print()
+=======
+            voice.speak(reply)
+    except Exception as e:
+>>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
         console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
         console.print()
         append_turn(session_log, "jarvis", f"[error: {e}]")
@@ -149,8 +167,11 @@ def main():
 
     jarvis = JarvisLLM(confirm_callback=confirm_tool_call)
     voice = JarvisVoice()
+<<<<<<< HEAD
     import threading
     threading.Thread(target=voice.warm_up, daemon=True).start()
+=======
+>>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
     speak_replies = False
     session_log = []
 
@@ -271,7 +292,10 @@ def main():
                     console.print("[bold green]Jarvis (wake)[/bold green] \u203a Yes?")
 
                     try:
+<<<<<<< HEAD
                         set_pet_state("listening")
+=======
+>>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
                         transcribed = voice.listen()
                     except RuntimeError as e:
                         console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
@@ -298,7 +322,10 @@ def main():
 
             try:
                 console.print("[dim]Listening...[/dim]")
+<<<<<<< HEAD
                 set_pet_state("listening")
+=======
+>>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
                 transcribed = voice.listen(duration) if duration else voice.listen()
             except RuntimeError as e:
                 console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
