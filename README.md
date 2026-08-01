@@ -1,33 +1,41 @@
 # Local-Jarvis
 
-A local, offline AI assistant built in Python — CLI-based, with retrieval-augmented generation (RAG) over your own documents.
+A local, offline AI assistant built in Python — CLI-based, with retrieval-augmented generation (RAG) over your own documents, streaming voice-first responses, and broad control over your machine.
+
+The goal isn't a chatbot with some tools bolted on — it's treating the whole computer as something you talk to. Not "open Explorer, search folders, open Chrome, copy files" but "find the PDF where I wrote about binary trees" and it just knows. Eventually the OS becomes the hardware layer and Jarvis becomes the interface.
 
 ## Features
 
-- Offline LLM via [Ollama](https://ollama.com) (`qwen3:8b`)
-- Local retrieval-augmented generation (RAG)
-- Semantic document search
+- Offline LLM via [Ollama](https://ollama.com) (`qwen3:8b` by default)
+- **Streaming responses** — replies print and speak sentence-by-sentence as they're generated, not after the whole answer is ready
+- **Short-term conversation memory** — the last few turns of the current session ride along in every prompt, so vague follow-ups ("open it", "try that again", "make it louder") resolve against what just happened
+- A lightweight **plan-skip heuristic** — only genuinely multi-step requests pay for an extra planning round-trip; quick questions and one-line commands go straight to an answer
+- Local retrieval-augmented generation (RAG) over documents you ingest
+- Whole-computer semantic file search
 - ChromaDB vector database for local, persistent storage
-- Document ingestion for building your knowledge base
+- Long-term memory across sessions, plus structured remembered facts
+- Voice in and out — wake word, natural pause-detection recording, local TTS, and background model warm-up so the first interaction isn't the slow one
+- Vision — screen OCR, plus image understanding via a local Moondream model
+- Full desktop control: files, windows, mouse/keyboard, shell commands, git
+- Self-improvement — proactive suggestions from patterns in its own audit log
 - Runs completely offline — no data leaves your machine
 
 ## Quick start (Windows)
 
 Download this repo as a ZIP, extract it anywhere, and double-click **`start_jarvis.bat`**.
 
-On the first run it will create a virtual environment and install dependencies automatically -- this can take a few minutes. Every run after that starts instantly. Make sure [Python 3.11](https://www.python.org/downloads/) and [Ollama](https://ollama.com) are installed first (the script will tell you if either is missing).
+On the first run it will create a virtual environment and install dependencies automatically — this can take a few minutes. Every run after that starts instantly. Make sure [Python 3.11](https://www.python.org/downloads/) and [Ollama](https://ollama.com) are installed first (the script will tell you if either is missing).
 
 ## Quick start (macOS/Linux)
 
 Download this repo, extract it, and run **`./start_jarvis.sh`** from a terminal (same first-run behavior as the Windows launcher: creates a venv, installs dependencies, then starts instantly on every run after).
 
-If double-clicking it in Finder opens a text editor instead of running it, the executable bit was likely stripped during download/extraction -- run `chmod +x start_jarvis.sh` once, or just run `./start_jarvis.sh` from Terminal.
+If double-clicking it in Finder opens a text editor instead of running it, the executable bit was likely stripped during download/extraction — run `chmod +x start_jarvis.sh` once, or just run `./start_jarvis.sh` from Terminal.
 
 ## Requirements
 
 - Python 3.11
 - [Ollama](https://ollama.com) installed and running locally
-- [Ollama](https://ollama.com) installed and running locally, with `qwen3:8b` pulled (and optionally `moondream`, for image/screen description)
 
 ## Setup
 
@@ -65,57 +73,72 @@ Type `exit` or `quit` to end the session, or `/help` any time to see the full co
 
 ### Configuration
 
-Defaults (model name, tool-call round limit, voice/wake-word settings, which folders get indexed, chunk sizes) live in `config.py`. To change any of them without editing code, copy `jarvis_config.example.json` to `jarvis_config.json` at the project root and set just the keys you want -- everything else keeps its default. `jarvis_config.json` is gitignored, so personal tweaks (a different Ollama model, custom indexed folders) don't get committed. Unknown keys and malformed JSON are warned about and ignored rather than crashing the app.
+Defaults (model name, tool-call round limit, short-term memory window, voice/wake-word settings, which folders get indexed, chunk sizes) live in `config.py`. To change any of them without editing code, copy `jarvis_config.example.json` to `jarvis_config.json` at the project root and set just the keys you want — everything else keeps its default. `jarvis_config.json` is gitignored, so personal tweaks (a different Ollama model, custom indexed folders) don't get committed. Unknown keys and malformed JSON are warned about and ignored rather than crashing the app.
 
-**Why `qwen3:8b` instead of `llama3.1:8b`:** same size class and speed, but Qwen3 is trained specifically for tool calling and has a meaningfully lower rate of dropped/incorrect tool calls in independent benchmarks -- directly relevant here, since Jarvis's entire tool-use loop depends on the model reliably deciding *whether* to call a tool, not just formatting the call correctly. `llama3.1:8b` still works fine if you'd rather use it (set `"model": "llama3.1:8b"` in `jarvis_config.json`) -- it's the more battle-tested, more widely documented option, just no longer the sharper pick for this specific job.
+**Why `qwen3:8b` instead of `llama3.1:8b`:** same size class and speed, but Qwen3 is trained specifically for tool calling and has a meaningfully lower rate of dropped/incorrect tool calls in independent benchmarks — directly relevant here, since Jarvis's entire tool-use loop depends on the model reliably deciding *whether* to call a tool, not just formatting the call correctly. `llama3.1:8b` still works fine if you'd rather use it (set `"model": "llama3.1:8b"` in `jarvis_config.json`) — it's the more battle-tested, more widely documented option, just no longer the sharper pick for this specific job.
+
+### Responsiveness: streaming, short-term memory, and plan-skipping
+
+A few things work together to make Jarvis feel like it's actually keeping up with a conversation rather than processing requests one at a time:
+
+- **Streaming** — every model turn streams token-by-token. Sentences print (and, with `/speak on`, get queued to speech) as soon as they're complete, instead of waiting for the entire reply to finish generating first. Tool-calling is unaffected: a tool-calling turn produces little visible content before the call itself, so nothing meaningful gets spoken or printed early in that case — Jarvis just moves straight to running the tool.
+- **Short-term memory** — separate from the long-term ChromaDB-backed memory described below, Jarvis keeps the last few `(you, Jarvis)` turns of the *current* session verbatim and includes them in every prompt (`short_term_turns` in config, default 6 turn-pairs). This is what lets pronoun-heavy follow-ups work — "open it" or "make that louder" right after a prior command resolves against what was just said, which semantic recall alone can't do since a bare pronoun doesn't embed to anything meaningful.
+- **Plan-skipping** — the original design ran every message through a separate planning call before answering, even "hello". Now a lightweight heuristic (message length, multi-clause phrasing, sequencing words like "then"/"after that") decides whether a request looks like it needs more than one step. Simple questions and one-line commands skip straight to an answer; only requests that actually look multi-step pay for the extra planning round-trip and get a visible `Plan:` panel.
+- **Voice warm-up** — the speech-to-text and text-to-speech models load in a background thread at startup instead of lazily on first use, so the first `/voice` or spoken reply of a session isn't the slow one.
 
 ### Audit log
 
-Every tool call -- what ran, when, the arguments, and whether it needed (and got) your confirmation -- is recorded to `memory/audit_log.jsonl`. Run `/log` to see the last 20 calls, or `/log 50` for more.
+Every tool call — what ran, when, the arguments, and whether it needed (and got) your confirmation — is recorded to `memory/audit_log.jsonl`. Run `/log` to see the last 20 calls, or `/log 50` for more.
 
 ### Saving a conversation
 
-`/save` writes the current session to a Markdown file under `transcripts/` (or `/save path/to/file.md` for a custom location). This is just an export for your own records, not memory Jarvis reads back -- see the next section for that.
+`/save` writes the current session to a Markdown file under `transcripts/` (or `/save path/to/file.md` for a custom location). This is just an export for your own records, not memory Jarvis reads back — see the next section for that.
 
 ### Long-term memory
 
-Jarvis remembers past conversations across sessions -- not by pasting the whole history into every prompt (the local model's context window is too small for that), but by semantically recalling the few most relevant past turns for whatever you're currently asking. Ask something like *"continue the authentication system"* and Jarvis checks whether an earlier session already covered what was decided.
+Jarvis remembers past conversations across sessions — not by pasting the whole history into every prompt (the local model's context window is too small for that), but by semantically recalling the few most relevant past turns for whatever you're currently asking. Ask something like *"continue the authentication system"* and Jarvis checks whether an earlier session already covered what was decided.
 
-- Every turn (your message + Jarvis's reply) is automatically stored after each response -- no command needed.
+This is distinct from the short-term memory described above: short-term memory is exact, recent, and verbatim (this session's last few turns); long-term memory is semantic, cross-session, and selective (whatever's relevant to the current question, out of everything ever said).
+
+- Every turn (your message + Jarvis's reply) is automatically stored after each response — no command needed.
 - Stored in a separate ChromaDB collection (`jarvis_conversations`) from the manual RAG store and the file index, so the three don't collide.
-- `/forget` permanently clears all stored conversation memory *and* remembered facts (asks for confirmation first -- this can't be undone).
+- `/forget` permanently clears all stored conversation memory *and* remembered facts (asks for confirmation first — this can't be undone).
 
-Worth knowing: every turn gets stored, including trivial ones ("what time is it?"), rather than trying to judge what's "important" -- semantic search naturally deprioritizes irrelevant entries at retrieval time, so this is mostly harmless, but it does mean the store grows indefinitely with no pruning yet. If that becomes noisy over long-term use, periodic summarization/pruning would be the natural next refinement.
+Worth knowing: every turn gets stored, including trivial ones ("what time is it?"), rather than trying to judge what's "important" — semantic search naturally deprioritizes irrelevant entries at retrieval time, so this is mostly harmless, but it does mean the store grows indefinitely with no pruning yet. If that becomes noisy over long-term use, periodic summarization/pruning would be the natural next refinement.
 
-**Remembered facts** are a separate, more structured layer on top of generic conversation memory -- for things like *"my manager is named Sarah"* or *"I prefer dark mode"* that deserve to be tracked as durable facts, not just buried in a chat log:
+**Remembered facts** are a separate, more structured layer on top of generic conversation memory — for things like *"my manager is named Sarah"* or *"I prefer dark mode"* that deserve to be tracked as durable facts, not just buried in a chat log:
 
-- Jarvis calls `remember_fact` itself when something durable comes up in conversation (a person, a preference, a project detail) -- you don't need a special command, just tell it naturally.
+- Jarvis calls `remember_fact` itself when something durable comes up in conversation (a person, a preference, a project detail) — you don't need a special command, just tell it naturally.
 - `/memory` lists everything remembered so far; `/memory person` (or any category) filters to just that category.
 - Recalled facts are automatically included as context on every message, the same way past conversation turns are.
 
+Embeddings and the ChromaDB client are shared across all three memory stores (conversation memory, remembered facts, and the file index) via a lazy-init singleton in `memory/shared.py`, so SentenceTransformer and ChromaDB each load once per session rather than once per module.
+
 ### Insights (proactive suggestions)
 
-Jarvis checks the audit log (and tracked folder sizes) for patterns worth mentioning -- without you having to ask:
+Jarvis checks the audit log (and tracked folder sizes) for patterns worth mentioning — without you having to ask:
 
-- A command or action that's **failed 3+ times recently** ("`run_command(...)` has failed 4 times -- want help debugging it?")
-- A search/lookup you've **repeated 3+ times recently** ("You've searched for X 3 times -- want this remembered as something to check automatically?"), scoped to a curated set of tools where repetition is actually meaningful (not flagged for trivial things like `calculate` or `get_current_time`)
+- A command or action that's **failed 3+ times recently** ("`run_command(...)` has failed 4 times — want help debugging it?")
+- A search/lookup you've **repeated 3+ times recently** ("You've searched for X 3 times — want this remembered as something to check automatically?"), scoped to a curated set of tools where repetition is actually meaningful (not flagged for trivial things like `calculate` or `get_current_time`)
 - A tracked folder (Documents/Desktop/Downloads by default) that's **grown by 500 MB+** since it was last checked
 
-This runs automatically once at startup (silently, if there's nothing worth saying) and any time via `/insights`. It's checked at natural touchpoints, not continuously monitored in the background -- Jarvis has no persistent background process (that's what system-tray mode would add, a bigger, separate undertaking). Pattern matching on repeated actions is exact-match on the tool and its arguments, not semantic, so "flask project" and "the flask project setup" won't be recognized as the same repeated interest yet.
+This runs automatically once at startup (silently, if there's nothing worth saying) and any time via `/insights`. It's checked at natural touchpoints, not continuously monitored in the background — Jarvis has no persistent background process (that's what system-tray mode would add, a bigger, separate undertaking). Pattern matching on repeated actions is exact-match on the tool and its arguments, not semantic, so "flask project" and "the flask project setup" won't be recognized as the same repeated interest yet.
 
 ### Real-time diagnostics
 
-`/status` gives a live at-a-glance snapshot: CPU and memory usage, disk usage, system uptime, and the top processes by memory or CPU (`system_status`/`top_processes` are also available as tools Jarvis can call on its own, e.g. if you ask "what's using all my memory?"). Read-only, via `psutil` -- no confirmation needed.
+`/status` gives a live at-a-glance snapshot: CPU and memory usage, disk usage, system uptime, and the top processes by memory or CPU (`system_status`/`top_processes` are also available as tools Jarvis can call on its own, e.g. if you ask "what's using all my memory?"). Read-only, via `psutil` — no confirmation needed.
 
 ### Voice
 
-- `/voice` — speak your message; recording starts when you talk and stops automatically after a pause, no need to guess a duration (`/voice 10` still works if you want a fixed 10-second window instead)
+- `/voice` — speak your message; recording starts when you talk and stops automatically after a short pause, no need to guess a duration (`/voice 10` still works if you want a fixed 10-second window instead)
 - `/wake` — always-listening mode: say "Hey Jarvis" and it'll prompt "Yes?" then record your command with the same natural pause-detection as `/voice`, hands-free. Press Ctrl+C to stop and return to typed input.
-- `/speak on` / `/speak off` — toggle whether Jarvis speaks its replies aloud (off by default)
+- `/speak on` / `/speak off` — toggle whether Jarvis speaks its replies aloud (off by default). When on, speech is queued and played per-sentence as a reply streams in, rather than waiting for the full reply and reading it all at once.
 
-Speech-to-text runs via faster-whisper, text-to-speech via [Piper](https://github.com/rhasspy/piper) (a local neural TTS engine), wake-word detection via openWakeWord, and the pause-detection uses the Silero VAD model openWakeWord already bundles -- all fully local, no data leaves your machine. The first time you use `/voice` or `/wake`, faster-whisper downloads a small model (~150 MB) and caches it; the wake-word and VAD models ship bundled in the package itself, no download needed.
+Speech-to-text runs via faster-whisper, text-to-speech via Piper (reading its sample rate directly from the loaded voice model, with hardware-aware mic sample-rate detection so it matches whatever your microphone actually supports), wake-word detection via openWakeWord, and the pause-detection uses the Silero VAD model openWakeWord already bundles — all fully local, no extra install for the natural-cutoff behavior. STT and TTS models are pre-loaded in the background at startup rather than on first use, so the first `/voice` or spoken reply doesn't stall on a cold model load mid-conversation.
 
-**Piper setup (required for `/speak on`):** unlike the wake-word/VAD models, Piper voices aren't bundled -- download a voice's `.onnx` and `.onnx.json` pair from [Piper's voice list](https://github.com/rhasspy/piper/blob/master/VOICES.md) (e.g. `en_US-amy-medium`) and place both files in a `voices/` folder at the project root. This folder is gitignored since voice models can be tens of MB; `piper_voice_model` in `jarvis_config.json` lets you point at a different filename if you download something other than the default (`en_US-amy-medium.onnx`). Without a voice model present, `/speak on` fails with a clear error telling you what's missing -- everything else in Jarvis still works.
+### Vision
+
+Jarvis can look at images via a local Moondream model running through Ollama (`tools/vision.py`), following the same tool-registry pattern as everything else — no cloud vision API involved. Paired with `read_screen_text`/`find_text_on_screen` (OCR-based, text only) this gives Jarvis two complementary ways of understanding what's on screen or in an image: exact visible text via OCR, and general visual description via the vision model.
 
 ### Screen reading
 
@@ -125,21 +148,7 @@ Jarvis can capture and read the screen via OCR (`rapidocr-onnxruntime`, no exter
 - `find_text_on_screen` — locate a specific label (e.g. "Save", "Submit") and get its coordinates, meant to be paired with `mouse_click`
 - `take_screenshot` — save a PNG of the current screen
 
-All three are read-only, so none require confirmation. Worth knowing: this reads *text*, not layout or images -- Jarvis can find a button by its label but doesn't have general visual understanding of icons or graphics (that would need a vision-capable model, which isn't part of this setup).
-
-### Vision
-
-Beyond OCR (which only reads text that's literally rendered on screen), Jarvis can describe actual visual content -- photos, icons, layout, diagrams, colors -- via a local vision-language model:
-
-- `describe_image` — describe an image file, or (if no path is given) capture and describe the current screen, optionally answering a specific question about it (e.g. "is there a red car in this photo?")
-
-Runs through the same local Ollama server every other tool talks to, via the `moondream` model -- pull it once with:
-
-```bash
-ollama pull moondream
-```
-
-Read-only, so it never asks for confirmation. Worth knowing the distinction from screen reading: `read_screen_text`/`find_text_on_screen` know what text says, `describe_image` knows what things *look like* -- ask "what does my screen look like" or "what's in this photo" and Jarvis reaches for this instead of OCR.
+All three are read-only, so none require confirmation. Worth knowing: this reads *text*, not layout or images — pair it with the vision tool above for general visual understanding of icons or graphics.
 
 ### Window control
 
@@ -149,13 +158,13 @@ Beyond raw mouse/keyboard coordinates, Jarvis can find and control windows by ti
 - `focus_window` — bring a window to the front by a substring of its title (e.g. "Chrome", "Visual Studio Code")
 - `minimize_window` / `close_window` — self-explanatory; `close_window` can lose unsaved work in that window, so it asks for confirmation, same as `minimize_window` and `focus_window`
 
-Only `list_windows` is read-only and unconfirmed. Worth knowing: **PyGetWindow only supports Windows and macOS, not Linux** -- on an unsupported OS these tools return a clear error instead of crashing anything else.
+Only `list_windows` is read-only and unconfirmed. Worth knowing: **PyGetWindow only supports Windows and macOS, not Linux** — on an unsupported OS these tools return a clear error instead of crashing anything else.
 
 ### Full system access
 
-Jarvis can now run shell commands, launch apps/files/URLs, control the mouse and keyboard, read/write/delete/rename/move/organize files anywhere on the machine, and search the web when a task needs current information.
+Jarvis can run shell commands, launch apps/files/URLs, control the mouse and keyboard, read/write/delete/rename/move/organize files anywhere on the machine, and search the web when a task needs current information.
 
-**Every action that changes something on your machine asks for your confirmation first** -- Jarvis will show you exactly what it wants to run and wait for a yes/no. This covers: running commands, opening applications, clicking, typing, hotkeys, focusing/minimizing/closing windows, and writing, deleting, renaming, moving, or organizing files outside its own `workspace/` sandbox. Reads (files, directory listings, web search, listing windows) run without asking, since they can't change anything.
+**Every action that changes something on your machine asks for your confirmation first** — Jarvis will show you exactly what it wants to run and wait for a yes/no. This covers: running commands, opening applications, clicking, typing, hotkeys, focusing/minimizing/closing windows, and writing, deleting, renaming, moving, or organizing files outside its own `workspace/` sandbox. Reads (files, directory listings, web search, listing windows) run without asking, since they can't change anything.
 
 ### Organizing files
 
@@ -163,20 +172,20 @@ Beyond finding and reasoning over documents, Jarvis can act on them directly:
 
 - `rename_file` — rename a file in place
 - `move_file` — move a file into a folder (created automatically if it doesn't exist yet), optionally renaming it in the same step
-- `organize_directory` — sort every file directly inside a folder into subfolders by type (`images/`, `documents/`, `spreadsheets/`, `code/`, etc.) -- ask Jarvis to "organize my Downloads" and this is what runs. Only touches top-level files, so it won't re-shuffle something already organized into subfolders.
+- `organize_directory` — sort every file directly inside a folder into subfolders by type (`images/`, `documents/`, `spreadsheets/`, `code/`, etc.) — ask Jarvis to "organize my Downloads" and this is what runs. Only touches top-level files, so it won't re-shuffle something already organized into subfolders.
 
 All three ask for confirmation first, same as any other file change outside the sandbox.
 
 ### Semantic file search
 
-Find files by what they're *about*, not just their name -- e.g. "find the PDF where I wrote about binary trees" -- across `.txt`, `.md`, `.py`, `.pdf`, and `.docx` files.
+Find files by what they're *about*, not just their name — e.g. "find the PDF where I wrote about binary trees" — across `.txt`, `.md`, `.py`, `.pdf`, and `.docx` files.
 
 - `/index` — (re)index your Documents, Desktop, and Downloads folders. Only new or changed files are processed each time, so it's cheap to run again later.
-- Once indexed, just ask normally -- e.g. "find my notes about the Flask project" -- and Jarvis calls `search_files` automatically.
+- Once indexed, just ask normally — e.g. "find my notes about the Flask project" — and Jarvis calls `search_files` automatically.
 
 This is separate from the manual `ingest/ingest.py` knowledge base: that one is for documents you deliberately curate, this one is for finding *anything* on disk without ingesting it by hand first.
 
-Indexing batch-encodes and batch-stores each file's chunks in a single call rather than one round-trip per chunk, which is meaningfully faster for anything with a lot of chunks (a long PDF can easily have dozens). There's still no continuous background watcher -- true always-on file watching needs the same kind of persistent-process architecture that system-tray mode would require -- but Jarvis does check (cheaply, via file timestamps only, no actual re-indexing) whether anything's changed since your last `/index` and mentions it once at startup if so, so a stale index doesn't go unnoticed indefinitely.
+Indexing batch-encodes and batch-stores each file's chunks in a single call rather than one round-trip per chunk, which is meaningfully faster for anything with a lot of chunks (a long PDF can easily have dozens). There's still no continuous background watcher — true always-on file watching needs the same kind of persistent-process architecture that system-tray mode would require — but Jarvis does check (cheaply, via file timestamps only, no actual re-indexing) whether anything's changed since your last `/index` and mentions it once at startup if so, so a stale index doesn't go unnoticed indefinitely.
 
 ### Git integration
 
@@ -184,11 +193,7 @@ Structured git tools instead of guessing the right flags through the generic com
 
 ### Planning
 
-For anything that looks like it needs more than one step (e.g. "create a Flask API, run it, test it, fix errors, commit"), Jarvis first sketches a short plan and shows it to you before touching any tools, then works through it step by step -- adjusting if a step's result changes what's needed, rather than following the plan blindly. Simple questions skip this and go straight to an answer. Each step gets printed live as it works.
-
-## Vision
-
-The goal isn't a chatbot with some tools bolted on -- it's treating the whole computer as something you talk to. Not "open Explorer, search folders, open Chrome, copy files" but "find the PDF where I wrote about binary trees" and it just knows. Eventually the OS becomes the hardware layer and Jarvis becomes the interface.
+For anything that genuinely looks like it needs more than one step (long or multi-clause requests, sequencing language like "then" or "after that"), Jarvis first sketches a short plan and shows it to you before touching any tools, then works through it step by step — adjusting if a step's result changes what's needed, rather than following the plan blindly. Everything else — questions, one-line commands, greetings — skips this and goes straight to a streamed answer. Each step gets printed live as it works.
 
 ## Roadmap
 
@@ -199,32 +204,35 @@ Offline LLM, local RAG, CLI, file indexing.
 File manipulation (sandboxed and unrestricted), opening apps, running terminal commands, semantic file search, and structured git tools (status/log/diff/branch free, add/commit/checkout/push confirmed).
 
 **Phase 3 — Planning & reasoning** ✅ *done*
-Tool selection (the model picks which tool to call per turn) plus an explicit planning step for multi-step tasks: a short plan is generated and shown before execution, then followed step by step with room to adapt if something unexpected happens. The round limit for a single request went from 6 to 15 to give multi-step tasks room to actually finish.
+Tool selection (the model picks which tool to call per turn) plus an explicit planning step for multi-step tasks: a short plan is generated and shown before execution, then followed step by step with room to adapt if something unexpected happens. A lightweight heuristic now decides whether planning is even needed, so simple requests skip it entirely instead of paying for a planning call every time.
 
 **Phase 4 — Voice** ✅ *done*
-Speech input (`/voice`), offline recognition (faster-whisper), text-to-speech (`/speak on`), and now always-listening wake word (`/wake`, "Hey Jarvis" via openWakeWord).
+Speech input (`/voice`), offline recognition (faster-whisper), text-to-speech via Piper (`/speak on`), always-listening wake word (`/wake`, "Hey Jarvis" via openWakeWord), and background model warm-up at startup.
 
-**Phase 5 — Desktop automation** ✅ *done*
-Mouse and keyboard control, plus screen reading via OCR (`read_screen_text`, `find_text_on_screen`, `take_screenshot`) so Jarvis can find and click things by their visible label. Reads text only, not general visual/layout understanding -- that would need a vision-capable model, which isn't part of this setup.
+**Phase 5 — Desktop automation & vision** ✅ *done*
+Mouse and keyboard control, screen reading via OCR (`read_screen_text`, `find_text_on_screen`, `take_screenshot`), and general image/screen understanding via a local Moondream vision model — so Jarvis can find and click things by their visible label, or describe what's actually on screen beyond just text.
 
 **Phase 6 — Long-term memory** ✅ *done*
-Every conversation turn is automatically stored and semantically recalled in future sessions, so Jarvis can pick up context from earlier work ("continue the authentication system") without you re-explaining it. `/forget` clears it all if needed. Not covered: explicit user-preference modeling or habit tracking as a distinct concept -- everything is stored uniformly as conversation turns, and habit *learning* specifically (noticing patterns and proactively acting on them) is Phase 7's job.
+Every conversation turn is automatically stored and semantically recalled in future sessions, so Jarvis can pick up context from earlier work ("continue the authentication system") without you re-explaining it. `/forget` clears it all if needed.
 
 **Phase 7 — Self-improvement** ✅ *done*
-`/insights` (and an automatic silent check at startup) surfaces proactive suggestions from patterns in the audit log: repeated failures, repeated searches/actions worth automating, and tracked-folder growth. This is "notice patterns using the data Phase 6 already logs," not autonomous action -- Jarvis surfaces suggestions and waits to be asked, it doesn't act on them itself. Checked at natural touchpoints (startup, `/insights`), not continuously monitored -- true background monitoring needs the same kind of persistent-process architecture that system-tray mode would require, which is its own separate undertaking. Pattern matching is exact-match on tool + arguments, not semantic, so near-duplicate phrasing ("flask project" vs. "the flask project setup") isn't recognized as the same repeated interest yet.
+`/insights` (and an automatic silent check at startup) surfaces proactive suggestions from patterns in the audit log: repeated failures, repeated searches/actions worth automating, and tracked-folder growth. Checked at natural touchpoints (startup, `/insights`), not continuously monitored — true background monitoring needs the same kind of persistent-process architecture that system-tray mode would require, which is its own separate undertaking.
 
-All 7 original roadmap phases are now complete.
+**Phase 8 — Responsiveness** ✅ *done*
+Streaming replies (sentence-by-sentence output and speech instead of waiting for the full response), a rolling short-term memory of the current session so vague follow-ups resolve correctly, and a plan-skip heuristic so simple requests no longer pay for an unnecessary planning round-trip.
+
+All 8 phases are now complete. Bigger architectural directions still on the table: system tray / persistent background mode, and more autonomous agent behavior.
 
 ## Testing
 
-A pytest suite covers the highest-risk logic: confirmation gating (declined risky tools must never execute), the chat/planning flow, memory storage on every exit path, file-safety edge cases (the `move_file` bug below among them), incremental indexing, pattern detection, and config loading. It deliberately doesn't need the heavy runtime stack (Ollama, ChromaDB, sentence-transformers) installed -- those are mocked, so the suite stays fast and lightweight for contributors:
+A pytest suite covers the highest-risk logic: confirmation gating (declined risky tools must never execute), the chat/planning/streaming flow, memory storage on every exit path, file-safety edge cases, incremental indexing, pattern detection, and config loading. It deliberately doesn't need the heavy runtime stack (Ollama, ChromaDB, sentence-transformers) installed — those are mocked, so the suite stays fast and lightweight for contributors:
 
 ```bash
 pip install -r requirements-dev.txt
 pytest
 ```
 
-70 tests, runs in about a second. Verified clean in an isolated environment with only `requirements-dev.txt` installed -- no accidental dependency on the full runtime stack.
+Verified clean in an isolated environment with only `requirements-dev.txt` installed — no accidental dependency on the full runtime stack.
 
 ## Project structure
 
@@ -232,13 +240,14 @@ pytest
 Local-Jarvis/
 ├── start_jarvis.bat     # Windows double-click launcher
 ├── start_jarvis.sh       # macOS/Linux launcher
-├── main.py              # CLI entry point / chat loop
+├── main.py              # CLI entry point / chat loop, streaming output
 ├── config.py             # Central config defaults + jarvis_config.json loader
 ├── jarvis_config.example.json # Template -- copy to jarvis_config.json to override defaults
 ├── pytest.ini             # Test discovery config
 ├── brain/
-│   └── llm.py            # Ollama LLM wrapper + tool-calling loop + confirmation gating + audit logging
+│   └── llm.py            # Ollama LLM wrapper + streaming tool-calling loop + short-term memory + plan-skip heuristic + confirmation gating + audit logging
 ├── memory/
+│   ├── shared.py           # Lazy-init singleton embedder/ChromaDB client shared across memory stores
 │   ├── retriever.py       # ChromaDB-backed semantic search over manually-ingested docs
 │   ├── conversation_memory.py # Long-term memory: conversation turns + structured remembered facts
 │   ├── audit_log.py        # Records every tool call to memory/audit_log.jsonl
@@ -256,13 +265,15 @@ Local-Jarvis/
 │   ├── desktop_control.py   # Mouse/keyboard control (confirmed)
 │   ├── window_control.py     # Window list/focus/minimize/close via PyGetWindow (Windows/macOS only)
 │   ├── screen.py             # Screenshots + OCR (read-only, not confirmed)
+│   ├── vision.py             # Image/screen understanding via local Moondream model (read-only)
 │   ├── diagnostics.py        # CPU/memory/disk/process stats via psutil (read-only) -> /status
 │   ├── memory_tools.py       # remember_fact tool wrapper (read-only from the system's perspective)
 │   └── web.py                # Web search (read-only, not confirmed)
-│   ├── vision.py             # Screen/image description via Ollama's moondream model (read-only)
 ├── voice/
-│   ├── voice.py            # Local speech-to-text (faster-whisper) + text-to-speech (pyttsx3) + VAD-based natural recording
+│   ├── voice.py            # Local speech-to-text (faster-whisper) + text-to-speech (Piper) + VAD-based natural recording + async speech queue + startup warm-up
 │   └── wake_word.py         # "Hey Jarvis" wake-word detection (openWakeWord)
+├── ui/
+│   └── pet_bridge.py        # Experimental desktop-companion bridge
 ├── tests/                 # pytest suite -- see Testing section above
 ├── workspace/            # Sandbox folder file tools operate in (gitignored)
 ├── transcripts/          # Saved /save exports (gitignored)
