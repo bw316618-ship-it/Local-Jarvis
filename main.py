@@ -16,6 +16,7 @@ from memory.insights import get_suggestions
 from tools.diagnostics import system_status, top_processes
 from ui.splash import play_boot_animation
 from ui.thinking import ThinkingPulse
+from ui.hud_server import hud
 
 console = Console()
 
@@ -25,6 +26,7 @@ COMMANDS = [
     ("/insights", "Check for proactive suggestions based on recent activity"),
     ("/status", "Show current CPU, memory, disk, and top processes at a glance"),
     ("/memory [category]", "List facts Jarvis has explicitly remembered about you"),
+    ("/hud", "Toggle the graphical HUD (opens/closes a local browser tab)"),
     ("/voice [N]", "Speak your message -- stops automatically after a pause (or specify N seconds)"),
     ("/wake", "Always-listening mode -- say \"Hey Jarvis\" (Ctrl+C to stop)"),
     ("/speak on|off", "Toggle whether Jarvis speaks its replies aloud"),
@@ -94,8 +96,18 @@ def show_step(message: str) -> None:
         console.print(f"[dim]  \u2192 {message[len('Step: '):] if message.startswith('Step: ') else message}[/dim]")
 
 
+def _tool_name_from_step(message: str) -> str:
+    """Best-effort extraction of a tool name from a 'Step: name(args)' message,
+    for the HUD's 'tool' state label -- falls back to the raw message if the
+    shape doesn't match (e.g. a plan announcement)."""
+    body = message[len("Step: "):] if message.startswith("Step: ") else message
+    return body.split("(")[0].strip()
+
+
 def handle_message(jarvis: JarvisLLM, voice: JarvisVoice, text: str, speak_replies: bool, session_log: list) -> None:
     append_turn(session_log, "user", text)
+
+    hud.set_state("thinking")
 
     pulse = ThinkingPulse(console)
     pulse.start()
@@ -106,26 +118,30 @@ def handle_message(jarvis: JarvisLLM, voice: JarvisVoice, text: str, speak_repli
         if not stopped:
             pulse.stop()
             stopped = True
-            console.print("[bold blue]Jarvis[/bold blue] [dim]›[/dim] ", end="")
+            console.print("[bold blue]Jarvis[/bold blue] [dim]\u203a[/dim] ", end="")
 
     def on_sentence(sentence: str) -> None:
+        hud.set_state("speaking")
         _stop_once()
         console.print(sentence, end=" ", soft_wrap=True, highlight=False)
         if speak_replies:
             voice.speak_async(sentence)
 
     def on_step(message: str) -> None:
+        hud.set_state("tool", {"name": _tool_name_from_step(message)})
         _stop_once()
         show_step(message)
 
     try:
         reply = jarvis.chat(text, on_step=on_step, on_sentence=on_sentence)
         _stop_once()
+        hud.set_state("idle")
         console.print()
         console.print()
         append_turn(session_log, "jarvis", reply)
     except Exception as e:
         _stop_once()
+        hud.set_state("error")
         console.print()
         console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
         console.print()
@@ -165,6 +181,7 @@ def main():
         lowered = stripped.lower()
 
         if lowered in ("exit", "quit"):
+            hud.stop()
             console.print("[dim]Goodbye.[/dim]")
             break
 
@@ -205,6 +222,27 @@ def main():
             else:
                 console.print("[dim]Nothing remembered yet" + (f" under '{category}'." if category else ".") + "[/dim]")
             console.print()
+            continue
+
+        if lowered == "/hud":
+            if hud.is_running():
+                hud.stop()
+                console.print("[dim]Graphical HUD closed.[/dim]\n")
+            else:
+                started = hud.start(open_browser=True)
+                if started:
+                    console.print(f"[dim]Graphical HUD opened at http://localhost:{hud.http_port} -- run /hud again to close it.[/dim]\n")
+                else:
+                    console.print(
+                        Panel(
+                            "Could not start the HUD (the 'websockets' package may not be "
+                            "installed -- run: pip install -r requirements.txt).",
+                            title="[bold red]HUD unavailable[/bold red]",
+                            border_style="red",
+                            expand=False,
+                        )
+                    )
+                    console.print()
             continue
 
         if lowered == "/forget":
@@ -261,21 +299,26 @@ def main():
                     listen_for_wake_word()
                     console.print("[bold green]Jarvis (wake)[/bold green] \u203a Yes?")
 
+                    hud.set_state("listening")
                     try:
                         transcribed = voice.listen()
                     except RuntimeError as e:
+                        hud.set_state("error")
                         console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
                         continue
 
                     if not transcribed:
+                        hud.set_state("idle")
                         console.print("[dim]Didn't catch anything -- listening for the wake word again...[/dim]\n")
                         continue
 
                     console.print(f"[bold green]You (voice)[/bold green] \u203a {transcribed}")
                     handle_message(jarvis, voice, transcribed, speak_replies, session_log)
             except KeyboardInterrupt:
+                hud.set_state("idle")
                 console.print("\n[dim]Stopped listening for the wake word.[/dim]\n")
             except RuntimeError as e:
+                hud.set_state("error")
                 console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
                 console.print()
             continue
@@ -286,15 +329,18 @@ def main():
             if len(parts) == 2 and parts[1].isdigit():
                 duration = int(parts[1])
 
+            hud.set_state("listening")
             try:
                 console.print("[dim]Listening...[/dim]")
                 transcribed = voice.listen(duration) if duration else voice.listen()
             except RuntimeError as e:
+                hud.set_state("error")
                 console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
                 console.print()
                 continue
 
             if not transcribed:
+                hud.set_state("idle")
                 console.print("[dim]Didn't catch anything -- try again.[/dim]\n")
                 continue
 

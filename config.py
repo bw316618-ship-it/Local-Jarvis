@@ -37,6 +37,11 @@ DEFAULTS = {
     "index_chunk_overlap": 50,
     "index_max_file_mb": 20,
     "piper_voice_model": "voices/en_US-amy-medium.onnx",
+    # ui/hud_server.py -- ports for the local graphical HUD (toggled via
+    # /hud). Only need to change these if something else on the machine
+    # is already using 8765/8766.
+    "hud_http_port": 8765,
+    "hud_ws_port": 8766,
 }
 
 
