@@ -14,6 +14,8 @@ from memory.audit_log import read_recent
 from memory.conversation_memory import forget_all, list_facts
 from memory.insights import get_suggestions
 from tools.diagnostics import system_status, top_processes
+from ui.splash import play_boot_animation
+
 
 console = Console()
 
@@ -114,6 +116,7 @@ def handle_message(jarvis: JarvisLLM, voice: JarvisVoice, text: str, speak_repli
 
 
 def main():
+    play_boot_animation()
     print_banner()
 
     jarvis = JarvisLLM(confirm_callback=confirm_tool_call)
