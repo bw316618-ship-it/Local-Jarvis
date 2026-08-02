@@ -15,7 +15,7 @@ from memory.conversation_memory import forget_all, list_facts
 from memory.insights import get_suggestions
 from tools.diagnostics import system_status, top_processes
 from ui.splash import play_boot_animation
-
+from ui.thinking import ThinkingPulse
 
 console = Console()
 
@@ -96,19 +96,36 @@ def show_step(message: str) -> None:
 
 def handle_message(jarvis: JarvisLLM, voice: JarvisVoice, text: str, speak_replies: bool, session_log: list) -> None:
     append_turn(session_log, "user", text)
-    console.print("[bold blue]Jarvis[/bold blue] [dim]\u203a[/dim] ", end="")
+
+    pulse = ThinkingPulse(console)
+    pulse.start()
+    stopped = False
+
+    def _stop_once():
+        nonlocal stopped
+        if not stopped:
+            pulse.stop()
+            stopped = True
+            console.print("[bold blue]Jarvis[/bold blue] [dim]›[/dim] ", end="")
 
     def on_sentence(sentence: str) -> None:
+        _stop_once()
         console.print(sentence, end=" ", soft_wrap=True, highlight=False)
         if speak_replies:
             voice.speak_async(sentence)
 
+    def on_step(message: str) -> None:
+        _stop_once()
+        show_step(message)
+
     try:
-        reply = jarvis.chat(text, on_step=show_step, on_sentence=on_sentence)
+        reply = jarvis.chat(text, on_step=on_step, on_sentence=on_sentence)
+        _stop_once()
         console.print()
         console.print()
         append_turn(session_log, "jarvis", reply)
     except Exception as e:
+        _stop_once()
         console.print()
         console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
         console.print()
