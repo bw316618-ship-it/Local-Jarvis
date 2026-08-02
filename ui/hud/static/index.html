@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Jarvis</title>
+  <link rel="stylesheet" href="hud.css" />
+</head>
+<body>
+  <!-- Shared SVG filter: turns feTurbulence noise into an alpha mask, then
+       clips the source element's own color through it -- this is what lets
+       the storm-mode clouds pick up var(--glow) automatically, same as
+       every other themed element on this page. -->
+  <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+    <defs>
+      <filter id="storm-noise" x="-20%" y="-20%" width="140%" height="140%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="4" seed="7" result="noise">
+          <animate attributeName="baseFrequency" values="0.010 0.016;0.015 0.011;0.010 0.016" dur="16s" repeatCount="indefinite" />
+        </feTurbulence>
+        <feColorMatrix in="noise" type="matrix"
+          values="0 0 0 0 0
+                  0 0 0 0 0
+                  0 0 0 0 0
+                  0.6 0.6 0.6 0 -0.35" result="alphaNoise" />
+        <feComposite in="SourceGraphic" in2="alphaNoise" operator="in" />
+      </filter>
+    </defs>
+  </svg>
+
+  <button id="modeToggle" title="Switch HUD style">STORM MODE</button>
+
+  <div id="wrap" data-state="idle" data-mode="reactor">
+    <div id="stage">
+      <div id="reactor">
+        <div class="ring ring-outer"></div>
+        <div class="ring ring-mid"></div>
+        <div class="ring ring-inner"></div>
+        <div class="dial" id="dial"><!-- 60 tick <span>s injected by hud.js --></div>
+        <div class="sweep"><div class="sweep-dot"></div></div>
+        <div class="core"></div>
+      </div>
+      <div id="storm">
+        <div class="storm-core"></div>
+        <div class="storm-cloud storm-cloud-1"></div>
+        <div class="storm-cloud storm-cloud-2"></div>
+        <div class="storm-frame">
+          <span class="frame-corner tl"></span>
+          <span class="frame-corner tr"></span>
+          <span class="frame-corner bl"></span>
+          <span class="frame-corner br"></span>
+        </div>
+      </div>
+      <div id="wordmark">J.A.R.V.I.S.</div>
+    </div>
+    <div id="statusline">
+      <span id="dot"></span>
+      <span id="statustext">connecting...</span>
+    </div>
+  </div>
+  <script src="hud.js"></script>
+</body>
+</html>
