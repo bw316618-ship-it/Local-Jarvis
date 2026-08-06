@@ -4,23 +4,52 @@
   <meta charset="UTF-8" />
   <title>Jarvis</title>
   <link rel="stylesheet" href="hud.css" />
+  <!-- Resolves the bare 'three' / 'three/addons/' specifiers storm3d.js
+       imports -- required for ES module imports to work at all, and
+       must come before any module script that uses them. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
 </head>
 <body>
-  <!-- Shared SVG filter: turns feTurbulence noise into an alpha mask, then
-       clips the source element's own color through it -- this is what lets
-       the storm-mode clouds pick up var(--glow) automatically, same as
-       every other themed element on this page. -->
+  <!-- Shared SVG filters: turn feTurbulence noise into an alpha mask, then
+       clip the source element's own color through it -- this is what lets
+       every storm-mode layer pick up var(--glow) automatically, same as
+       every other themed element on this page.
+
+       Two filters: `storm-noise` (type="turbulence", anisotropic
+       baseFrequency) reads more like flowing veins/traces than soft
+       clouds -- closer to the reference art's circuit-like filaments.
+       `storm-noise-fine` is higher-frequency and harsher-thresholded,
+       used only for the sparse bright speckle ring near the edge. -->
   <svg width="0" height="0" style="position: absolute" aria-hidden="true">
     <defs>
       <filter id="storm-noise" x="-20%" y="-20%" width="140%" height="140%">
-        <feTurbulence type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="4" seed="7" result="noise">
-          <animate attributeName="baseFrequency" values="0.010 0.016;0.015 0.011;0.010 0.016" dur="16s" repeatCount="indefinite" />
+        <feTurbulence type="turbulence" baseFrequency="0.006 0.05" numOctaves="5" seed="7" result="noise">
+          <animate attributeName="baseFrequency" values="0.005 0.045;0.008 0.055;0.005 0.045" dur="18s" repeatCount="indefinite" />
         </feTurbulence>
         <feColorMatrix in="noise" type="matrix"
           values="0 0 0 0 0
                   0 0 0 0 0
                   0 0 0 0 0
-                  0.6 0.6 0.6 0 -0.35" result="alphaNoise" />
+                  0.6 0.6 0.6 0 -0.32" result="alphaNoise" />
+        <feComposite in="SourceGraphic" in2="alphaNoise" operator="in" />
+      </filter>
+
+      <filter id="storm-noise-fine" x="-20%" y="-20%" width="140%" height="140%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.09" numOctaves="3" seed="21" result="noise">
+          <animate attributeName="seed" values="21;58;33;21" dur="22s" repeatCount="indefinite" />
+        </feTurbulence>
+        <feColorMatrix in="noise" type="matrix"
+          values="0 0 0 0 0
+                  0 0 0 0 0
+                  0 0 0 0 0
+                  0.9 0.9 0.9 0 -0.62" result="alphaNoise" />
         <feComposite in="SourceGraphic" in2="alphaNoise" operator="in" />
       </filter>
     </defs>
@@ -39,14 +68,35 @@
         <div class="core"></div>
       </div>
       <div id="storm">
-        <div class="storm-core"></div>
-        <div class="storm-cloud storm-cloud-1"></div>
-        <div class="storm-cloud storm-cloud-2"></div>
+        <canvas id="stormCanvas"></canvas>
+        <div id="stormFallback">
+          <!-- Shown only if Three.js/WebGL isn't available -- e.g. no
+               internet on first load (Three.js is CDN-hosted) or a
+               browser/GPU that can't do WebGL. Keeps storm mode fully
+               functional offline, just with the older look. -->
+          <div class="storm-spokes"></div>
+          <div class="storm-cloud storm-cloud-1"></div>
+          <div class="storm-cloud storm-cloud-2"></div>
+          <div class="storm-sparks"></div>
+          <div class="storm-core storm-core-a"></div>
+          <div class="storm-core storm-core-b"></div>
+        </div>
         <div class="storm-frame">
           <span class="frame-corner tl"></span>
           <span class="frame-corner tr"></span>
           <span class="frame-corner bl"></span>
           <span class="frame-corner br"></span>
+        </div>
+        <div class="hud-scanline"></div>
+        <div class="hud-reticle">
+          <span class="reticle-ring"></span>
+          <span class="reticle-line horizontal"></span>
+          <span class="reticle-line vertical"></span>
+        </div>
+        <div class="hud-glyphs">
+          <span class="glyph g1"></span>
+          <span class="glyph g2"></span>
+          <span class="glyph g3"></span>
         </div>
       </div>
       <div id="wordmark">J.A.R.V.I.S.</div>
@@ -56,6 +106,46 @@
       <span id="statustext">connecting...</span>
     </div>
   </div>
-  <script src="hud.js"></script>
+
+  <!-- Chat panel -- talks to jarvis_daemon.py's JarvisLLM over the same
+       WebSocket the state broadcasts use. If this HUD tab is connected to
+       main.py's CLI instead (no JarvisLLM attached on the server side),
+       sending a message here just gets a 'chat isn't available' notice
+       back instead of a reply. -->
+  <div id="chatPanel">
+    <div id="chatLog"></div>
+    <form id="chatForm" autocomplete="off">
+      <input id="chatInput" type="text" placeholder="Talk to Jarvis..." autocomplete="off" />
+      <button type="submit">Send</button>
+    </form>
+  </div>
+
+  <!-- Confirmation modal -- shown when a risky tool call needs approval
+       and there's no terminal to ask (jarvis_daemon.py's browser-only
+       confirmation path). Hidden entirely otherwise. -->
+  <div id="confirmOverlay" class="hidden">
+    <div id="confirmBox">
+      <div id="confirmTitle">Confirm action</div>
+      <div id="confirmBody"></div>
+      <div id="confirmButtons">
+        <button id="confirmDeny">Deny</button>
+        <button id="confirmApprove">Allow</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Three.js powers storm mode's WebGL particle renderer (storm3d.js),
+       now with real bloom post-processing -- which is only available as
+       ES modules, hence type="module" here (see the importmap in <head>).
+       CDN-hosted, so it needs internet on first load -- if it fails to
+       load or WebGL isn't available, hud.js falls back to the CSS-
+       turbulence layers in #stormFallback automatically.
+
+       Module scripts defer automatically (run after parsing, in order);
+       hud.js needs `defer` too so it reliably runs *after* storm3d.js has
+       attached window.StormScene, since a plain classic script would
+       otherwise execute immediately and race ahead of the module. -->
+  <script type="module" src="storm3d.js"></script>
+  <script src="hud.js" defer></script>
 </body>
 </html>
