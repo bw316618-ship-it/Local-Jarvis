@@ -7,9 +7,10 @@ fully local, no external OCR binary like Tesseract required.
 
 All three tools here are read-only (they only look at the screen, never
 change anything), so none are registered as risky. Worth knowing: this
-only reads TEXT on screen, not icons, images, or layout -- true visual
-understanding of arbitrary UI would need a vision-capable model, which
-Jarvis doesn't have configured (qwen3:8b is text-only).
+only reads TEXT on screen, not icons, images, or layout -- for actual
+visual understanding of arbitrary UI (icons, photos, layout), use
+describe_image in tools/vision.py instead, which asks a local
+vision-language model (moondream) rather than OCR-ing text.
 """
 
 import tempfile
