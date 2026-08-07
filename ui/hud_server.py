@@ -231,17 +231,14 @@ class HUDBridge:
                     pending["event"].set()
 
     def _handle_user_message(self, text: str) -> None:
-        """Runs jarvis.chat() on a worker thread (started from the
-        asyncio recv handler) and broadcasts each callback as it fires."""
+        """Runs the shared session handler on a worker thread and streams
+        the reply/state updates back over the HUD channel."""
         with self._chat_lock:
-            def on_step(message: str) -> None:
-                self.broadcast_tool_step(message)
+            from brain.session import JarvisSession
 
-            def on_sentence(sentence: str) -> None:
-                self.broadcast_reply_chunk(sentence)
-
+            session = JarvisSession(self._jarvis, hud=self, broadcast_text=True)
             try:
-                self._jarvis.chat(text, on_step=on_step, on_sentence=on_sentence)
+                session.handle_message(text)
             except Exception as e:
                 self._broadcast({"type": "error", "text": f"Jarvis hit an error: {e}"})
             finally:
