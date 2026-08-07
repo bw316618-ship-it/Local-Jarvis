@@ -60,7 +60,7 @@ fi
 if ! command -v ollama >/dev/null 2>&1; then
     echo "[WARNING] Ollama was not found on your PATH."
     echo "Jarvis needs Ollama installed and running locally."
-    echo "Get it from https://ollama.com then run: ollama pull qwen3:8b"
+    echo "Get it from https://ollama.com then run: ollama pull qwen3:4b"
     echo
 fi
 
