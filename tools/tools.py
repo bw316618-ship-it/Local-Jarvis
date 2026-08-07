@@ -129,7 +129,12 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "list_directory",
-            "description": "List the files and subfolders inside a directory on the local machine.",
+            "description": (
+                "List the files and subfolders inside a known directory on the "
+                "local machine. Use search_files instead when looking for a file "
+                "by what it's about rather than browsing a folder you already "
+                "know the path to."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

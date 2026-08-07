@@ -115,7 +115,11 @@ SCREEN_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "take_screenshot",
-            "description": "Capture a screenshot of the current screen and save it as a PNG file.",
+            "description": (
+                "Capture a screenshot of the current screen and save it as a PNG "
+                "file. If you just need to know what's currently on screen rather "
+                "than save a file, use describe_image or read_screen_text instead."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
