@@ -1,22 +1,21 @@
 import pyfiglet
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.rule import Rule
 from rich.table import Table
 
 from brain.llm import JarvisLLM
-from voice.voice import JarvisVoice
-from voice.wake_word import listen_for_wake_word
-from tools.file_index import index_files, count_pending_changes
-from memory.transcript import append_turn, save_transcript
+from brain.session import JarvisSession, make_confirm_callback
 from memory.audit_log import read_recent
 from memory.conversation_memory import forget_all, list_facts
 from memory.insights import get_suggestions
+from memory.transcript import save_transcript
 from tools.diagnostics import system_status, top_processes
-from ui.splash import play_boot_animation
-from ui.thinking import ThinkingPulse
+from tools.file_index import count_pending_changes, index_files
 from ui.hud_server import hud
+from ui.splash import play_boot_animation
+from voice.voice import JarvisVoice
+from voice.wake_word import listen_for_wake_word
 
 console = Console()
 
@@ -75,87 +74,16 @@ def print_help() -> None:
     )
 
 
-def confirm_tool_call(name: str, arguments: dict) -> bool:
-    console.print(
-        Panel(
-            f"{name}({arguments})",
-            title="[bold yellow]Confirm[/bold yellow]",
-            border_style="yellow",
-            expand=False,
-        )
-    )
-    answer = console.input("[bold yellow]Allow this?[/bold yellow] [y/N] > ").strip().lower()
-    return answer == "y"
-
-
-def show_step(message: str) -> None:
-    if message.startswith("Plan:"):
-        plan_body = message[len("Plan:"):].strip()
-        console.print(Panel(plan_body, title="[bold magenta]Plan[/bold magenta]", border_style="magenta", expand=False))
-    else:
-        console.print(f"[dim]  \u2192 {message[len('Step: '):] if message.startswith('Step: ') else message}[/dim]")
-
-
-def _tool_name_from_step(message: str) -> str:
-    """Best-effort extraction of a tool name from a 'Step: name(args)' message,
-    for the HUD's 'tool' state label -- falls back to the raw message if the
-    shape doesn't match (e.g. a plan announcement)."""
-    body = message[len("Step: "):] if message.startswith("Step: ") else message
-    return body.split("(")[0].strip()
-
-
-def handle_message(jarvis: JarvisLLM, voice: JarvisVoice, text: str, speak_replies: bool, session_log: list) -> None:
-    append_turn(session_log, "user", text)
-
-    hud.set_state("thinking")
-
-    pulse = ThinkingPulse(console)
-    pulse.start()
-    stopped = False
-
-    def _stop_once():
-        nonlocal stopped
-        if not stopped:
-            pulse.stop()
-            stopped = True
-            console.print("[bold blue]Jarvis[/bold blue] [dim]\u203a[/dim] ", end="")
-
-    def on_sentence(sentence: str) -> None:
-        hud.set_state("speaking")
-        _stop_once()
-        console.print(sentence, end=" ", soft_wrap=True, highlight=False)
-        if speak_replies:
-            voice.speak_async(sentence)
-
-    def on_step(message: str) -> None:
-        hud.set_state("tool", {"name": _tool_name_from_step(message)})
-        _stop_once()
-        show_step(message)
-
-    try:
-        reply = jarvis.chat(text, on_step=on_step, on_sentence=on_sentence)
-        _stop_once()
-        hud.set_state("idle")
-        console.print()
-        console.print()
-        append_turn(session_log, "jarvis", reply)
-    except Exception as e:
-        _stop_once()
-        hud.set_state("error")
-        console.print()
-        console.print(Panel(str(e), title="[bold red]Error[/bold red]", border_style="red", expand=False))
-        console.print()
-        append_turn(session_log, "jarvis", f"[error: {e}]")
-
-
 def main():
     play_boot_animation()
     print_banner()
 
-    jarvis = JarvisLLM(confirm_callback=confirm_tool_call)
+    jarvis = JarvisLLM(confirm_callback=make_confirm_callback(console=console))
     voice = JarvisVoice()
+    session = JarvisSession(jarvis, hud=hud, console=console, voice=voice, broadcast_text=False)
 
     import threading
+
     threading.Thread(target=voice.warm_up, daemon=True).start()
 
     speak_replies = False
@@ -166,17 +94,17 @@ def main():
         if startup_suggestions:
             show_insights(startup_suggestions, title="Noticed a few things")
     except Exception:
-        pass  # startup should never fail because of an insights hiccup
+        pass
 
     try:
         pending = count_pending_changes()
         if pending:
             console.print(f"[dim]{pending} file(s) have changed since your last /index -- run /index to keep search results fresh.[/dim]\n")
     except Exception:
-        pass  # same -- a stale-check hiccup should never block startup
+        pass
 
     while True:
-        user_input = console.input("[bold green]You[/bold green] [dim]\u203a[/dim] ")
+        user_input = console.input("[bold green]You[/bold green] [dim]›[/dim] ")
         stripped = user_input.strip()
         lowered = stripped.lower()
 
@@ -235,8 +163,7 @@ def main():
                 else:
                     console.print(
                         Panel(
-                            "Could not start the HUD (the 'websockets' package may not be "
-                            "installed -- run: pip install -r requirements.txt).",
+                            "Could not start the HUD (the 'websockets' package may not be installed -- run: pip install -r requirements.txt).",
                             title="[bold red]HUD unavailable[/bold red]",
                             border_style="red",
                             expand=False,
@@ -248,8 +175,7 @@ def main():
         if lowered == "/forget":
             console.print(
                 Panel(
-                    "This permanently deletes everything Jarvis has learned from past "
-                    "conversations across all sessions. It cannot be undone.",
+                    "This permanently deletes everything Jarvis has learned from past conversations across all sessions. It cannot be undone.",
                     title="[bold yellow]Confirm[/bold yellow]",
                     border_style="yellow",
                     expand=False,
@@ -297,7 +223,7 @@ def main():
             try:
                 while True:
                     listen_for_wake_word()
-                    console.print("[bold green]Jarvis (wake)[/bold green] \u203a Yes?")
+                    console.print("[bold green]Jarvis (wake)[/bold green] › Yes?")
 
                     hud.set_state("listening")
                     try:
@@ -312,8 +238,8 @@ def main():
                         console.print("[dim]Didn't catch anything -- listening for the wake word again...[/dim]\n")
                         continue
 
-                    console.print(f"[bold green]You (voice)[/bold green] \u203a {transcribed}")
-                    handle_message(jarvis, voice, transcribed, speak_replies, session_log)
+                    console.print(f"[bold green]You (voice)[/bold green] › {transcribed}")
+                    session.handle_message(transcribed, speak_replies, session_log)
             except KeyboardInterrupt:
                 hud.set_state("idle")
                 console.print("\n[dim]Stopped listening for the wake word.[/dim]\n")
@@ -344,10 +270,10 @@ def main():
                 console.print("[dim]Didn't catch anything -- try again.[/dim]\n")
                 continue
 
-            console.print(f"[bold green]You (voice)[/bold green] \u203a {transcribed}")
+            console.print(f"[bold green]You (voice)[/bold green] › {transcribed}")
             user_input = transcribed
 
-        handle_message(jarvis, voice, user_input, speak_replies, session_log)
+        session.handle_message(user_input, speak_replies, session_log)
         console.print(Rule(style="dim"))
 
 
