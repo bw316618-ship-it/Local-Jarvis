@@ -66,8 +66,6 @@ Once Ollama is installed, pull the default model:
 ollama pull qwen3:4b
 ```
 
-> The launch scripts currently print `ollama pull qwen3:8b` as a suggestion — that's stale; `qwen3:4b` is the real default in `config.py`. Pull whichever model you actually set in `jarvis_config.json`.
-
 ## Manual setup
 
 If you'd rather not use the launch scripts:
@@ -169,14 +167,14 @@ Everything else is just a normal message — Jarvis decides on its own whether a
 - **Semantic file search** — `search_files`/`index_files` find files by what they're *about* across `.txt`, `.md`, `.py`, `.pdf`, `.docx`
 - **System** — run shell commands, open apps/files/URLs (confirmed), live diagnostics (`system_status`, `top_processes`, read-only)
 - **Desktop** — mouse/keyboard control (confirmed), window list/focus/minimize/close by title substring (list is read-only, the rest confirmed)
-- **Screen & vision** — OCR the screen (`read_screen_text`, `find_text_on_screen`) or ask a local vision model what's actually on screen or in an image (`describe_image`)
+- **Screen & vision** — OCR the screen (`read_screen_text`, `find_text_on_screen`, read-only) or ask a local vision model what's actually on screen or in an image (`describe_image`, read-only); saving a screenshot to disk (`take_screenshot`) is confirmed, since it's a file write to an arbitrary path
 - **Git** — structured `git_status`/`git_log`/`git_diff`/`git_branch_list` (free), `git_add`/`git_commit`/`git_checkout`/`git_push` (confirmed)
 - **Web** — `web_search` for anything current or external (read-only)
-- **Memory** — `remember_fact` for durable facts worth persisting across sessions
+- **Memory** — `remember_fact` for durable facts worth persisting across sessions (confirmed, since it's replayed into every future prompt as "known facts about the user")
 
 ## Safety: confirmation gating
 
-Every tool that changes something on your machine — running commands, opening apps, clicking, typing, hotkeys, focusing/minimizing/closing windows, writing/deleting/renaming/moving/organizing files outside the sandbox, and any git operation that mutates repo state — asks for your explicit confirmation first, whether you're in the terminal or the HUD. Reads (files, directory listings, web search, window listing, screen OCR) never ask, since they can't change anything. See `tools/tools.py`'s `RISKY_TOOLS` set and `tests/test_tools_registry.py` for the exact split.
+Every tool that changes something on your machine — running commands, opening apps, clicking, typing, hotkeys, focusing/minimizing/closing windows, writing/deleting/renaming/moving/organizing files outside the sandbox, saving a screenshot to disk, remembering a fact for future sessions, and any git operation that mutates repo state — asks for your explicit confirmation first, whether you're in the terminal or the HUD. Reads (files, directory listings, web search, window listing, screen OCR text) never ask, since they can't change anything. See `tools/tools.py`'s `RISKY_TOOLS` set and `tests/test_tools_registry.py` for the exact split.
 
 ## Testing
 
@@ -198,9 +196,11 @@ Local-Jarvis/
 ├── jarvis_config.example.json           # Copy to jarvis_config.json to override defaults
 ├── pytest.ini
 ├── brain/
-│   └── llm.py             # Ollama wrapper, streaming tool-calling loop, short-term memory, plan-skip
+│   ├── llm.py              # Ollama wrapper, streaming tool-calling loop, short-term memory, plan-skip
+│   └── session.py          # Shared confirm-callback + HUD/console plumbing used by main.py and jarvis_daemon.py
 ├── memory/
 │   ├── shared.py           # Shared embedder + ChromaDB client singletons
+│   ├── document_store.py   # Shared chunk/embed/index logic behind both RAG stores (manual + discovered)
 │   ├── retriever.py        # Semantic search over manually-ingested docs
 │   ├── conversation_memory.py  # Long-term turns + structured remembered facts
 │   ├── audit_log.py        # Every tool call -> memory/audit_log.jsonl
@@ -217,10 +217,10 @@ Local-Jarvis/
 │   ├── system.py            # Shell commands + app launching (confirmed)
 │   ├── desktop_control.py   # Mouse/keyboard (confirmed)
 │   ├── window_control.py    # Window list/focus/minimize/close (Windows/macOS only)
-│   ├── screen.py             # Screenshots + OCR
+│   ├── screen.py             # Screenshots (confirmed) + OCR (read-only)
 │   ├── vision.py             # Image/screen understanding via local Moondream
 │   ├── diagnostics.py        # CPU/memory/disk/process stats -> /status
-│   ├── memory_tools.py       # remember_fact wrapper
+│   ├── memory_tools.py       # remember_fact wrapper (confirmed)
 │   └── web.py                 # Web search
 ├── voice/
 │   ├── voice.py             # STT (faster-whisper) + TTS (Piper) + VAD recording

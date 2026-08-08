@@ -1,6 +1,8 @@
 {
   "model": "qwen3:4b",
+  "num_ctx": 8192,
   "max_tool_rounds": 15,
+  "short_term_turns": 6,
   "whisper_model": "base.en",
   "voice_listen_seconds": 6,
   "voice_silence_seconds": 1.2,
