@@ -1,10 +1,10 @@
 # Local-Jarvis
 
-A local, offline-first AI assistant for Windows (also runs on macOS/Linux with reduced features) — CLI-based, voice-capable, with retrieval-augmented generation over your own documents and broad control over your machine.
+A local, offline-first AI assistant for Windows (also runs on macOS/Linux with reduced features), CLI-based, voice-capable, with retrieval-augmented generation over your own documents and broad control over your machine.
 
-The goal isn't a chatbot with some tools bolted on. It's "find the PDF where I wrote about binary trees" and it just knows — not "open Explorer, search folders, open the file." Eventually the OS becomes the hardware layer and Jarvis becomes the interface.
+The goal isn't a chatbot with some tools bolted on. It's "find the PDF where I wrote about binary trees" and it just knows, not "open Explorer, search folders, open the file." Eventually the OS becomes the hardware layer and Jarvis becomes the interface.
 
-> **Status:** all 8 roadmap phases below are complete. Currently in active tuning — see [Model notes](#model-notes) for the current model/latency work.
+> **Status:** all 8 roadmap phases below are complete. Currently in active tuning, see [Model notes](#model-notes) for the current model/latency work.
 
 ---
 
@@ -31,18 +31,18 @@ The goal isn't a chatbot with some tools bolted on. It's "find the PDF where I w
 ## Features
 
 - **Offline LLM** via [Ollama](https://ollama.com), tool-calling loop with confirmation gating on anything state-changing
-- **Streaming responses** — replies print and (optionally) speak sentence-by-sentence as they generate, not after the whole reply is ready
-- **Short-term + long-term memory** — verbatim recent turns for pronoun-heavy follow-ups ("open it", "try that again"), plus semantic recall of past sessions and explicitly remembered facts (`remember_fact`)
-- **Plan-skip heuristic** — only genuinely multi-step requests pay for an extra planning round-trip
-- **Local RAG** over documents you ingest, plus whole-computer semantic file search (`search_files`) — separate from the manual ingest store
-- **Voice in/out** — wake word ("Hey Jarvis"), pause-detection recording, local TTS (Piper), background model warm-up
-- **Vision** — screen OCR (`read_screen_text`, `find_text_on_screen`) plus general image understanding via a local Moondream model
-- **Full desktop control** — files (sandboxed *and* unrestricted), windows, mouse/keyboard, shell commands, git
-- **Graphical HUD** — an optional browser-based reactor/"data storm" visualization with a live chat panel and browser-side confirmation prompts, in addition to the terminal
-- **Standalone daemon mode** — run Jarvis as a background process reachable purely from a browser tab, independent of any terminal session
-- **Self-improvement** — proactive suggestions (`/insights`) from patterns in its own audit log: repeated failures, repeated searches, folder growth
-- **Real-time diagnostics** — `/status` for CPU/memory/disk/top processes
-- Runs completely offline — no data leaves your machine
+- **Streaming responses**, replies print and (optionally) speak sentence-by-sentence as they generate, not after the whole reply is ready
+- **Short-term + long-term memory**, verbatim recent turns for pronoun-heavy follow-ups ("open it", "try that again"), plus semantic recall of past sessions and explicitly remembered facts (`remember_fact`)
+- **Plan-skip heuristic**, only genuinely multi-step requests pay for an extra planning round-trip
+- **Local RAG** over documents you ingest, plus whole-computer semantic file search (`search_files`), separate from the manual ingest store
+- **Voice in/out**, wake word ("Hey Jarvis"), pause-detection recording, local TTS (Piper), background model warm-up
+- **Vision**, screen OCR (`read_screen_text`, `find_text_on_screen`) plus general image understanding via a local Moondream model
+- **Full desktop control**, files (sandboxed *and* unrestricted), windows, mouse/keyboard, shell commands, git
+- **Graphical HUD**, an optional browser-based reactor/"data storm" visualization with a live chat panel and browser-side confirmation prompts, in addition to the terminal
+- **Standalone daemon mode**, run Jarvis as a background process reachable purely from a browser tab, independent of any terminal session
+- **Self-improvement**, proactive suggestions (`/insights`) from patterns in its own audit log: repeated failures, repeated searches, folder growth
+- **Real-time diagnostics**, `/status` for CPU/memory/disk/top processes
+- Runs completely offline, no data leaves your machine
 
 ## Quick start
 
@@ -56,9 +56,9 @@ Download this repo as a ZIP, extract it anywhere, and double-click **`start_jarv
 ./start_jarvis.sh
 ```
 
-If double-clicking it in Finder opens a text editor instead of running it, the executable bit was likely stripped during extraction — run `chmod +x start_jarvis.sh` once.
+If double-clicking it in Finder opens a text editor instead of running it, the executable bit was likely stripped during extraction, run `chmod +x start_jarvis.sh` once.
 
-Both launchers create a virtual environment and install dependencies on first run only (a marker file in `venv/` skips that step on every run after). Make sure **[Python 3.11](https://www.python.org/downloads/)** and **[Ollama](https://ollama.com)** are installed first — the scripts will warn you if either is missing.
+Both launchers create a virtual environment and install dependencies on first run only (a marker file in `venv/` skips that step on every run after). Make sure **[Python 3.11](https://www.python.org/downloads/)** and **[Ollama](https://ollama.com)** are installed first, the scripts will warn you if either is missing.
 
 Once Ollama is installed, pull the default model:
 
@@ -76,9 +76,9 @@ ollama pull qwen3:4b
 python main.py
 ```
 
-> **Windows + `pip freeze`:** if you ever regenerate `requirements.txt` yourself, write it as UTF-8 — PowerShell's default `>` redirection encodes UTF-16LE, which breaks `pip install -r requirements.txt`. Use `pip freeze | Out-File -Encoding utf8 requirements.txt` instead.
+> **Windows + `pip freeze`:** if you ever regenerate `requirements.txt` yourself, write it as UTF-8, PowerShell's default `>` redirection encodes UTF-16LE, which breaks `pip install -r requirements.txt`. Use `pip freeze | Out-File -Encoding utf8 requirements.txt` instead.
 
-Ingest documents into the manual knowledge base (optional, do this whenever you want — it's separate from the chat loop):
+Ingest documents into the manual knowledge base (optional, do this whenever you want, it's separate from the chat loop):
 
 ```bash
 python ingest/ingest.py <folder>
@@ -94,11 +94,11 @@ There are three ways to run Jarvis, depending on how you want to interact with i
 python main.py
 ```
 
-The default CLI loop — full command set (`/voice`, `/wake`, `/log`, `/save`, etc.), confirmation prompts printed inline. Type `exit` or `quit` to end the session, `/help` any time for the full command list.
+The default CLI loop, full command set (`/voice`, `/wake`, `/log`, `/save`, etc.), confirmation prompts printed inline. Type `exit` or `quit` to end the session, `/help` any time for the full command list.
 
 ### Graphical HUD
 
-From inside the terminal chat, run `/hud` to open a local browser tab with a live reactor/storm visualization, a chat panel, and browser-side confirmation prompts for risky tool calls — layered on top of the same `JarvisLLM` instance the terminal is driving. Run `/hud` again to close it.
+From inside the terminal chat, run `/hud` to open a local browser tab with a live reactor/storm visualization, a chat panel, and browser-side confirmation prompts for risky tool calls, layered on top of the same `JarvisLLM` instance the terminal is driving. Run `/hud` again to close it.
 
 ### Standalone daemon (browser-only)
 
@@ -106,25 +106,25 @@ From inside the terminal chat, run `/hud` to open a local browser tab with a liv
 python jarvis_daemon.py
 ```
 
-Runs Jarvis with **no terminal input loop at all** — just its own `JarvisLLM` plus the HUD bridge, so closing the terminal that launched it doesn't have to kill it (background/detach it at the OS level if you want it to outlive the terminal — see the docstring in `jarvis_daemon.py` for the exact `nohup`/`pythonw` incantations per platform). Chat and tool confirmations happen entirely through the browser tab it opens.
+Runs Jarvis with **no terminal input loop at all**, just its own `JarvisLLM` plus the HUD bridge, so closing the terminal that launched it doesn't have to kill it (background/detach it at the OS level if you want it to outlive the terminal, see the docstring in `jarvis_daemon.py` for the exact `nohup`/`pythonw` incantations per platform). Chat and tool confirmations happen entirely through the browser tab it opens.
 
-Voice (`/voice`, `/wake`) and terminal-only commands (`/log`, `/save`, `/insights`, etc.) are **not** available here — those are `main.py` CLI features layered on top of `JarvisLLM`, not part of the core assistant itself.
+Voice (`/voice`, `/wake`) and terminal-only commands (`/log`, `/save`, `/insights`, etc.) are **not** available here, those are `main.py` CLI features layered on top of `JarvisLLM`, not part of the core assistant itself.
 
 ## Configuration
 
-Defaults live in `config.py`. To override any of them, copy `jarvis_config.example.json` to `jarvis_config.json` at the project root and set just the keys you want — everything else keeps its default. `jarvis_config.json` is gitignored, so personal tweaks never get committed. Unknown keys and malformed JSON are warned about and ignored, not crashed on.
+Defaults live in `config.py`. To override any of them, copy `jarvis_config.example.json` to `jarvis_config.json` at the project root and set just the keys you want, everything else keeps its default. `jarvis_config.json` is gitignored, so personal tweaks never get committed. Unknown keys and malformed JSON are warned about and ignored, not crashed on.
 
 | Key | Default | Used by |
 |---|---|---|
 | `model` | `qwen3:4b` | `brain/llm.py` |
-| `num_ctx` | `8192` | `brain/llm.py` — raise if tool schemas get silently truncated |
+| `num_ctx` | `8192` | `brain/llm.py`, raise if tool schemas get silently truncated |
 | `max_tool_rounds` | `15` | `brain/llm.py` |
-| `short_term_turns` | `6` | `brain/llm.py` — verbatim (user, jarvis) turn pairs kept per session |
+| `short_term_turns` | `6` | `brain/llm.py`, verbatim (user, jarvis) turn pairs kept per session |
 | `whisper_model` | `base.en` | `voice/voice.py` |
 | `voice_listen_seconds` | `6` | `voice/voice.py` (fixed-duration fallback) |
-| `voice_silence_seconds` | `1.2` | `voice/voice.py` — pause length that ends VAD recording |
-| `voice_max_wait_seconds` | `6` | `voice/voice.py` — give up if nobody speaks |
-| `voice_max_recording_seconds` | `30` | `voice/voice.py` — hard cap regardless of pauses |
+| `voice_silence_seconds` | `1.2` | `voice/voice.py`, pause length that ends VAD recording |
+| `voice_max_wait_seconds` | `6` | `voice/voice.py`, give up if nobody speaks |
+| `voice_max_recording_seconds` | `30` | `voice/voice.py`, hard cap regardless of pauses |
 | `wake_word_threshold` | `0.5` | `voice/wake_word.py` |
 | `command_timeout_seconds` | `30` | `tools/system.py`, `tools/git_tools.py` |
 | `index_roots` | `null` (→ Documents/Desktop/Downloads) | `tools/file_index.py` |
@@ -135,11 +135,11 @@ Defaults live in `config.py`. To override any of them, copy `jarvis_config.examp
 
 ## Model notes
 
-**Why `qwen3:4b`, not a larger model:** Qwen3 is trained specifically for tool calling and has a meaningfully lower rate of dropped/incorrect tool calls than similarly-sized general models — directly relevant here, since the whole tool-use loop depends on the model reliably deciding *whether* to call a tool, not just formatting the call correctly. `llama3.1:8b` still works (`"model": "llama3.1:8b"` in `jarvis_config.json`) if you'd rather use the more battle-tested option.
+**Why `qwen3:4b`, not a larger model:** Qwen3 is trained specifically for tool calling and has a meaningfully lower rate of dropped/incorrect tool calls than similarly-sized general models, directly relevant here, since the whole tool-use loop depends on the model reliably deciding *whether* to call a tool, not just formatting the call correctly. `llama3.1:8b` still works (`"model": "llama3.1:8b"` in `jarvis_config.json`) if you'd rather use the more battle-tested option.
 
 **VRAM-constrained setups:** on cards around 6GB VRAM, 8B-class models split across CPU/GPU and get slow. `qwen3:4b` fits fully in VRAM on most such cards; if you're evaluating pulls, `qwen3:4b-instruct-2507-q4_K_M` is non-thinking by architecture (rather than relying on a `think=False` flag, which isn't honored by every pull's chat template) and has improved tool-calling reliability over earlier `qwen3:4b` builds.
 
-**Piper voices** aren't bundled — download a `.onnx` + `.onnx.json` pair from the [Piper voices list](https://github.com/rhasspy/piper/blob/master/VOICES.md), place both in `voices/`, and point `piper_voice_model` at the `.onnx` file if it's not the default.
+**Piper voices** aren't bundled, download a `.onnx` + `.onnx.json` pair from the [Piper voices list](https://github.com/rhasspy/piper/blob/master/VOICES.md), place both in `voices/`, and point `piper_voice_model` at the `.onnx` file if it's not the default.
 
 ## Command reference
 
@@ -151,8 +151,8 @@ Defaults live in `config.py`. To override any of them, copy `jarvis_config.examp
 | `/status` | CPU, memory, disk, and top processes at a glance |
 | `/memory [category]` | List facts Jarvis has explicitly remembered about you |
 | `/hud` | Toggle the graphical HUD (opens/closes a local browser tab) |
-| `/voice [N]` | Speak your message — stops automatically after a pause, or record for a fixed N seconds |
-| `/wake` | Always-listening mode — say "Hey Jarvis" (Ctrl+C to stop) |
+| `/voice [N]` | Speak your message, stops automatically after a pause, or record for a fixed N seconds |
+| `/wake` | Always-listening mode, say "Hey Jarvis" (Ctrl+C to stop) |
 | `/speak on\|off` | Toggle whether Jarvis speaks replies aloud |
 | `/save [path]` | Save this session's transcript to Markdown |
 | `/log [n]` | Show the last n tool calls (default 20) |
@@ -161,20 +161,20 @@ Defaults live in `config.py`. To override any of them, copy `jarvis_config.examp
 
 ## What Jarvis can do
 
-Everything else is just a normal message — Jarvis decides on its own whether a tool call is needed.
+Everything else is just a normal message, Jarvis decides on its own whether a tool call is needed.
 
-- **Files** — sandboxed read/write/delete inside `workspace/` (always auto-approved reads/writes within the sandbox), or unrestricted read/write/delete/rename/move/organize anywhere on the machine (writes confirmed)
-- **Semantic file search** — `search_files`/`index_files` find files by what they're *about* across `.txt`, `.md`, `.py`, `.pdf`, `.docx`
-- **System** — run shell commands, open apps/files/URLs (confirmed), live diagnostics (`system_status`, `top_processes`, read-only)
-- **Desktop** — mouse/keyboard control (confirmed), window list/focus/minimize/close by title substring (list is read-only, the rest confirmed)
-- **Screen & vision** — OCR the screen (`read_screen_text`, `find_text_on_screen`, read-only) or ask a local vision model what's actually on screen or in an image (`describe_image`, read-only); saving a screenshot to disk (`take_screenshot`) is confirmed, since it's a file write to an arbitrary path
-- **Git** — structured `git_status`/`git_log`/`git_diff`/`git_branch_list` (free), `git_add`/`git_commit`/`git_checkout`/`git_push` (confirmed)
-- **Web** — `web_search` for anything current or external (read-only)
-- **Memory** — `remember_fact` for durable facts worth persisting across sessions (confirmed, since it's replayed into every future prompt as "known facts about the user")
+- **Files**, sandboxed read/write/delete inside `workspace/` (always auto-approved reads/writes within the sandbox), or unrestricted read/write/delete/rename/move/organize anywhere on the machine (writes confirmed)
+- **Semantic file search**, `search_files`/`index_files` find files by what they're *about* across `.txt`, `.md`, `.py`, `.pdf`, `.docx`
+- **System**, run shell commands, open apps/files/URLs (confirmed), live diagnostics (`system_status`, `top_processes`, read-only)
+- **Desktop**, mouse/keyboard control (confirmed), window list/focus/minimize/close by title substring (list is read-only, the rest confirmed)
+- **Screen & vision**, OCR the screen (`read_screen_text`, `find_text_on_screen`, read-only) or ask a local vision model what's actually on screen or in an image (`describe_image`, read-only); saving a screenshot to disk (`take_screenshot`) is confirmed, since it's a file write to an arbitrary path
+- **Git**, structured `git_status`/`git_log`/`git_diff`/`git_branch_list` (free), `git_add`/`git_commit`/`git_checkout`/`git_push` (confirmed)
+- **Web**, `web_search` for anything current or external (read-only)
+- **Memory**, `remember_fact` for durable facts worth persisting across sessions (confirmed, since it's replayed into every future prompt as "known facts about the user")
 
 ## Safety: confirmation gating
 
-Every tool that changes something on your machine — running commands, opening apps, clicking, typing, hotkeys, focusing/minimizing/closing windows, writing/deleting/renaming/moving/organizing files outside the sandbox, saving a screenshot to disk, remembering a fact for future sessions, and any git operation that mutates repo state — asks for your explicit confirmation first, whether you're in the terminal or the HUD. Reads (files, directory listings, web search, window listing, screen OCR text) never ask, since they can't change anything. See `tools/tools.py`'s `RISKY_TOOLS` set and `tests/test_tools_registry.py` for the exact split.
+Every tool that changes something on your machine, running commands, opening apps, clicking, typing, hotkeys, focusing/minimizing/closing windows, writing/deleting/renaming/moving/organizing files outside the sandbox, saving a screenshot to disk, remembering a fact for future sessions, and any git operation that mutates repo state, asks for your explicit confirmation first, whether you're in the terminal or the HUD. Reads (files, directory listings, web search, window listing, screen OCR text) never ask, since they can't change anything. See `tools/tools.py`'s `RISKY_TOOLS` set and `tests/test_tools_registry.py` for the exact split.
 
 ## Testing
 
@@ -241,14 +241,14 @@ Local-Jarvis/
 
 | Phase | Status | Covers |
 |---|---|---|
-| 1 — Foundation | ✅ | Offline LLM, local RAG, CLI, file indexing |
-| 2 — File & system control | ✅ | Sandboxed + unrestricted file ops, app/command execution, semantic search, structured git tools |
-| 3 — Planning & reasoning | ✅ | Per-turn tool selection, plan-skip heuristic for multi-step requests |
-| 4 — Voice | ✅ | `/voice`, `/wake`, Piper TTS, background model warm-up |
-| 5 — Desktop automation & vision | ✅ | Mouse/keyboard, screen OCR, Moondream vision |
-| 6 — Long-term memory | ✅ | Cross-session recall, `/forget` |
-| 7 — Self-improvement | ✅ | `/insights` pattern detection |
-| 8 — Responsiveness | ✅ | Streaming, short-term memory, plan-skip |
-| 9 — Graphical surfaces *(unreleased phase)* | ✅ (code present, undocumented until now) | `/hud`, `jarvis_daemon.py` standalone browser mode |
+| 1, Foundation | ✅ | Offline LLM, local RAG, CLI, file indexing |
+| 2, File & system control | ✅ | Sandboxed + unrestricted file ops, app/command execution, semantic search, structured git tools |
+| 3, Planning & reasoning | ✅ | Per-turn tool selection, plan-skip heuristic for multi-step requests |
+| 4, Voice | ✅ | `/voice`, `/wake`, Piper TTS, background model warm-up |
+| 5, Desktop automation & vision | ✅ | Mouse/keyboard, screen OCR, Moondream vision |
+| 6, Long-term memory | ✅ | Cross-session recall, `/forget` |
+| 7, Self-improvement | ✅ | `/insights` pattern detection |
+| 8, Responsiveness | ✅ | Streaming, short-term memory, plan-skip |
+| 9, Graphical surfaces *(unreleased phase)* | ✅ (code present, undocumented until now) | `/hud`, `jarvis_daemon.py` standalone browser mode |
 
 Bigger directions still on the table: system-tray / persistent background mode by default, two-tier model routing (a `/think-hard` command routing occasional hard-reasoning tasks to a larger local model), and more autonomous agent behavior.
