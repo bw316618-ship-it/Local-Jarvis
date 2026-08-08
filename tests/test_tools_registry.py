@@ -30,7 +30,7 @@ def test_read_only_tools_are_not_marked_risky():
         "get_current_time", "calculate", "list_directory", "read_file",
         "list_workspace", "read_any_file", "search_files", "index_files",
         "git_status", "git_log", "git_diff", "git_branch_list",
-        "take_screenshot", "read_screen_text", "find_text_on_screen",
+        "read_screen_text", "find_text_on_screen",
         "list_windows", "system_status", "top_processes", "web_search",
     }
     present = read_only_tools & set(TOOL_FUNCTIONS)
@@ -39,14 +39,17 @@ def test_read_only_tools_are_not_marked_risky():
 
 
 def test_state_changing_tools_are_marked_risky():
-    """Tools that change the real filesystem/system/repo/window state
-    should always require confirmation."""
+    """Tools that change the real filesystem/system/repo/window state --
+    or that persist information into every future prompt -- should
+    always require confirmation."""
     should_be_risky = {
         "run_command", "open_application", "write_any_file", "delete_any_file",
         "rename_file", "move_file", "organize_directory",
         "git_add", "git_commit", "git_checkout", "git_push",
         "mouse_click", "keyboard_type", "keyboard_hotkey",
         "focus_window", "minimize_window", "close_window",
+        "take_screenshot",  # writes an arbitrary file to disk
+        "remember_fact",  # persists into every future prompt as "known facts"
     }
     present = should_be_risky & set(TOOL_FUNCTIONS)
     assert present == should_be_risky, f"expected risky tools missing from registry: {should_be_risky - present}"
