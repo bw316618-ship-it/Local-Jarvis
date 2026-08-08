@@ -5,12 +5,19 @@ Reuses pyautogui (already a dependency for mouse/keyboard control) to
 capture the screen, and rapidocr-onnxruntime to extract text from it --
 fully local, no external OCR binary like Tesseract required.
 
-All three tools here are read-only (they only look at the screen, never
-change anything), so none are registered as risky. Worth knowing: this
-only reads TEXT on screen, not icons, images, or layout -- for actual
-visual understanding of arbitrary UI (icons, photos, layout), use
-describe_image in tools/vision.py instead, which asks a local
-vision-language model (moondream) rather than OCR-ing text.
+read_screen_text and find_text_on_screen are read-only (they only look
+at the screen, never change anything) and aren't registered as risky.
+take_screenshot is different: it writes a PNG to a path the caller
+supplies, creating any missing parent directories along the way. An
+arbitrary-path file write is exactly the kind of action every other
+write tool in this codebase (write_file, write_any_file, ...) requires
+confirmation for, so this one is registered as risky too rather than
+being lumped in with the two genuinely read-only tools above it.
+
+Worth knowing: this only reads TEXT on screen, not icons, images, or
+layout -- for actual visual understanding of arbitrary UI (icons,
+photos, layout), use describe_image in tools/vision.py instead, which
+asks a local vision-language model (moondream) rather than OCR-ing text.
 """
 
 import tempfile
@@ -167,5 +174,7 @@ SCREEN_TOOL_FUNCTIONS = {
     "find_text_on_screen": find_text_on_screen,
 }
 
-# All read-only -- looking at the screen never changes anything.
-SCREEN_RISKY_TOOLS = set()
+# take_screenshot writes an arbitrary file to disk, so it's risky like any
+# other write tool. read_screen_text/find_text_on_screen only look at the
+# screen and never change anything.
+SCREEN_RISKY_TOOLS = {"take_screenshot"}
