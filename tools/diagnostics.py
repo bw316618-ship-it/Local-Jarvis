@@ -2,9 +2,9 @@
 Real-time diagnostics for Jarvis, via psutil.
 
 Live system status, performance, and health at a glance: CPU, memory,
-disk, uptime, and top processes. Everything here is read-only (looking at
-system stats never changes anything), so none of it is registered as
-risky.
+disk, uptime, top processes, and battery level. Everything here is
+read-only (looking at system stats never changes anything), so none of
+it is registered as risky.
 """
 
 from datetime import datetime, timedelta
@@ -77,6 +77,30 @@ def top_processes(by: str = "memory", count: int = TOP_PROCESS_COUNT) -> str:
     return "\n".join(lines)
 
 
+def battery_status() -> str:
+    """Return battery percentage and charging status, if a battery is present.
+
+    psutil.sensors_battery() returns None on desktops with no battery
+    (and on some platforms/kernels without the right sensors exposed) --
+    that's a normal case here, not an error, so it's reported plainly
+    rather than raised.
+    """
+    battery = psutil.sensors_battery()
+    if battery is None:
+        return "No battery detected -- this machine may be a desktop with no battery, or battery info isn't exposed on this platform."
+
+    plugged = "plugged in" if battery.power_plugged else "on battery"
+
+    if not battery.power_plugged and battery.secsleft not in (
+        psutil.POWER_TIME_UNLIMITED,
+        psutil.POWER_TIME_UNKNOWN,
+    ):
+        remaining = str(timedelta(seconds=battery.secsleft))
+        return f"{battery.percent:.0f}% -- {plugged} -- {remaining} remaining"
+
+    return f"{battery.percent:.0f}% -- {plugged}"
+
+
 DIAGNOSTICS_TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -101,11 +125,20 @@ DIAGNOSTICS_TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_battery_level",
+            "description": "Get the current battery percentage and charging status, if this machine has a battery.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 DIAGNOSTICS_TOOL_FUNCTIONS = {
     "system_status": system_status,
     "top_processes": top_processes,
+    "get_battery_level": battery_status,
 }
 
 # Read-only -- looking at system stats never changes anything.
