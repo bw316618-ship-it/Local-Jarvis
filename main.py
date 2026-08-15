@@ -14,6 +14,7 @@ from tools.diagnostics import system_status, top_processes
 from tools.file_index import count_pending_changes, index_files
 from ui.hud_server import hud
 from ui.splash import play_boot_animation
+from voice import session_state
 from voice.voice import JarvisVoice
 from voice.wake_word import listen_for_wake_word
 
@@ -70,8 +71,22 @@ def print_help() -> None:
         "[dim]Everything else is just a normal message -- Jarvis will run commands, "
         "manage files, control your mouse/keyboard, search the web, read the "
         "screen, and search indexed files as needed. It asks before anything "
-        "risky.[/dim]\n"
+        "risky. It can also end this session itself if you ask it to "
+        "disconnect.[/dim]\n"
     )
+
+
+def _handle_possible_session_end() -> bool:
+    """Check whether the model called end_session (tools/session_control.py)
+    during the last turn. If so, say goodbye, tear down the HUD, and clear
+    the flag for next time. Returns True if the caller should stop looping.
+    """
+    if not session_state.is_end_requested():
+        return False
+    session_state.clear_end_request()
+    hud.stop()
+    console.print("[dim]Goodbye.[/dim]")
+    return True
 
 
 def main():
@@ -240,6 +255,9 @@ def main():
 
                     console.print(f"[bold green]You (voice)[/bold green] › {transcribed}")
                     session.handle_message(transcribed, speak_replies, session_log)
+
+                    if _handle_possible_session_end():
+                        return
             except KeyboardInterrupt:
                 hud.set_state("idle")
                 console.print("\n[dim]Stopped listening for the wake word.[/dim]\n")
@@ -274,6 +292,10 @@ def main():
             user_input = transcribed
 
         session.handle_message(user_input, speak_replies, session_log)
+
+        if _handle_possible_session_end():
+            return
+
         console.print(Rule(style="dim"))
 
 
