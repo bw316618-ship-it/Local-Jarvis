@@ -298,3 +298,11 @@ Local-Jarvis/
 | 10, First new-tools tier | Done | Battery, location (OS-native with offline fallback), calendar, PDF opening, datasheet search, media control, now playing, mute and end-session |
 
 Bigger directions still on the table: webcam capture and an X-ray-style vision effect built on the existing Moondream pipeline, a HUD widget system (text notes, open/close/reset, a home dashboard widget, an in-HUD PDF viewer, map control), a system tray application with always-listening mode decoupled from the CLI, a floating transparent desktop overlay, and local image generation through a diffusion backend such as Automatic1111 or ComfyUI. Smart home integration and 3D printing support are explicitly out of scope for this project.
+
+## License
+
+Local-Jarvis is licensed under the [MIT License](LICENSE).
+
+Third-party software, models, datasets, and other dependencies used by
+Local-Jarvis may be subject to their own licenses. See the relevant project
+documentation before redistributing them.
