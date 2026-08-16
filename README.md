@@ -6,7 +6,7 @@ The goal isn't a chatbot with some tools bolted on. It's "find the PDF where I w
 
 > Status: all 8 original roadmap phases are complete, plus a graphical HUD phase and a first tier of new tools (battery, location, calendar, PDF viewer, datasheet search, media control, session control). See the Roadmap section for what's next.
 
-![Jarvis Demo](assets/jarvis-demo.gif)
+![Jarvis Demo](assets/Jarvis.gif)
 ---
 
 ## Table of contents
