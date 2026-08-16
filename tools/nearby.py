@@ -31,6 +31,11 @@ from tools.location import get_coordinates
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 REQUEST_TIMEOUT_SECONDS = 20
+
+OVERPASS_HEADERS = {
+    "User-Agent": "Local-Jarvis/1.0 (personal local-first AI assistant)",
+    "Accept": "application/json",
+}
 DEFAULT_RADIUS_KM = 2.0
 MAX_RESULTS = 5
 
@@ -100,7 +105,12 @@ def find_nearby_place(category: str, radius_km: float = DEFAULT_RADIUS_KM) -> st
     query = _build_query(here["lat"], here["lon"], int(radius_km * 1000), tag_filters, category_key)
 
     try:
-        response = requests.post(OVERPASS_URL, data={"data": query}, timeout=REQUEST_TIMEOUT_SECONDS)
+        response = requests.post(
+            OVERPASS_URL,
+            data={"data": query},
+            headers=OVERPASS_HEADERS,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
         response.raise_for_status()
         data = response.json()
     except requests.RequestException as e:
