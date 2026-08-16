@@ -38,7 +38,16 @@ If neither an OS-native service nor the local database is available,
 get_location() says so plainly rather than silently falling back to a
 live third-party API.
 
-Read-only (never changes anything), so it isn't registered as risky.
+get_coordinates() is the raw-data counterpart get_location() is built
+on, exported for other tools to chain off of (tools/nearby.py's
+find_nearby_place, tools/routing.py's get_route) without re-parsing a
+formatted sentence back into numbers. It's not itself registered as an
+LLM tool -- get_location() is the model-facing entry point for "where
+am I", and the two other tools already resolve the current location
+internally via get_coordinates() when no explicit origin is given.
+
+Read-only (never changes anything), so get_location isn't registered as
+risky.
 """
 
 import platform
@@ -55,15 +64,7 @@ IP_ECHO_URL = "https://api.ipify.org"  # returns plain-text IP only, no location
 REQUEST_TIMEOUT_SECONDS = 5
 
 
-def _format_place(city: str = None, region: str = None, country: str = None, lat=None, lon=None, source: str = "") -> str:
-    parts = [p for p in (city, region, country) if p]
-    place = ", ".join(parts) if parts else "an unknown place"
-    coords = f" (approx. {lat}, {lon})" if lat is not None and lon is not None else ""
-    tail = f" via {source}" if source else ""
-    return f"Approximate location: {place}{coords}{tail}."
-
-
-def _windows_location() -> str:
+def _windows_coordinates() -> dict:
     try:
         import asyncio
 
@@ -98,10 +99,10 @@ def _windows_location() -> str:
         return city, region, country, lat, lon
 
     city, region, country, lat, lon = asyncio.run(_query())
-    return _format_place(city, region, country, lat, lon, source="Windows Location Services")
+    return {"lat": lat, "lon": lon, "city": city, "region": region, "country": country, "source": "Windows Location Services"}
 
 
-def _macos_location() -> str:
+def _macos_coordinates() -> dict:
     try:
         import time
 
@@ -144,7 +145,7 @@ def _macos_location() -> str:
         raise RuntimeError("Could not get a location fix from macOS Location Services.")
 
     coord = location.coordinate()
-    return _format_place(lat=coord.latitude, lon=coord.longitude, source="macOS Location Services")
+    return {"lat": coord.latitude, "lon": coord.longitude, "city": None, "region": None, "country": None, "source": "macOS Location Services"}
 
 
 def _get_public_ip() -> str:
@@ -160,7 +161,7 @@ def _get_public_ip() -> str:
     return ip
 
 
-def _maxmind_location() -> str:
+def _maxmind_coordinates() -> dict:
     if not GEOIP_DB_PATH.exists():
         raise RuntimeError(
             f"No local GeoLite2 database found at '{GEOIP_DB_PATH}'. Download "
@@ -179,12 +180,42 @@ def _maxmind_location() -> str:
     except Exception as e:
         raise RuntimeError(f"Local GeoLite2 lookup failed: {e}") from e
 
-    city = record.city.name
-    region = record.subdivisions.most_specific.name
-    country = record.country.name
-    lat = record.location.latitude
-    lon = record.location.longitude
-    return _format_place(city, region, country, lat, lon, source="local GeoLite2 database")
+    return {
+        "lat": record.location.latitude,
+        "lon": record.location.longitude,
+        "city": record.city.name,
+        "region": record.subdivisions.most_specific.name,
+        "country": record.country.name,
+        "source": "local GeoLite2 database",
+    }
+
+
+def get_coordinates() -> dict:
+    """Resolve the current location as raw data: {lat, lon, city, region,
+    country, source}. Prefers OS-native location services (Windows/
+    macOS), falls back to the local offline MaxMind database. Raises
+    RuntimeError with every attempted source's failure reason if nothing
+    worked -- callers decide how to present that."""
+    system = platform.system()
+    errors = []
+
+    if system == "Windows":
+        try:
+            return _windows_coordinates()
+        except RuntimeError as e:
+            errors.append(f"Windows Location Services: {e}")
+    elif system == "Darwin":
+        try:
+            return _macos_coordinates()
+        except RuntimeError as e:
+            errors.append(f"macOS Location Services: {e}")
+
+    try:
+        return _maxmind_coordinates()
+    except RuntimeError as e:
+        errors.append(f"Local GeoLite2 database: {e}")
+
+    raise RuntimeError("\n".join(f"- {e}" for e in errors))
 
 
 def get_location() -> str:
@@ -192,26 +223,17 @@ def get_location() -> str:
     location services (Windows/macOS) and falling back to a local,
     offline IP-geolocation database. Never calls a live third-party
     geolocation API directly."""
-    system = platform.system()
-    errors = []
-
-    if system == "Windows":
-        try:
-            return _windows_location()
-        except RuntimeError as e:
-            errors.append(f"Windows Location Services: {e}")
-    elif system == "Darwin":
-        try:
-            return _macos_location()
-        except RuntimeError as e:
-            errors.append(f"macOS Location Services: {e}")
-
     try:
-        return _maxmind_location()
+        result = get_coordinates()
     except RuntimeError as e:
-        errors.append(f"Local GeoLite2 database: {e}")
+        return f"Could not determine location:\n{e}"
 
-    return "Could not determine location:\n" + "\n".join(f"- {e}" for e in errors)
+    parts = [p for p in (result["city"], result["region"], result["country"]) if p]
+    place = ", ".join(parts) if parts else "an unknown place"
+    return (
+        f"Approximate location: {place} "
+        f"(approx. {result['lat']}, {result['lon']}) via {result['source']}."
+    )
 
 
 LOCATION_TOOL_SCHEMAS = [
