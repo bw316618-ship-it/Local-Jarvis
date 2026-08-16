@@ -158,10 +158,15 @@ NEARBY_TOOL_SCHEMAS = [
         "function": {
             "name": "find_nearby_place",
             "description": (
-                "Find the nearest places of a given type (e.g. 'metro station', "
-                "'pharmacy', 'atm', 'supermarket') to the current location, using "
-                "OpenStreetMap data. Returns names and coordinates -- pass those "
-                "coordinates to get_route to get directions there."
+                "MANDATORY TOOL for nearby-location requests. "
+                "Use this tool whenever the user asks for nearby, nearest, closest, "
+                "or near-me places. Examples include 'nearby cafes', "
+                "'nearest metro station', 'closest pharmacy', 'restaurants near me', "
+                "'what is around me', and 'find coffee shops nearby'. "
+                "This tool uses the computer's current location and live "
+                "OpenStreetMap data. It returns real nearby places and their "
+                "coordinates. Do NOT claim that you lack live mapping data or "
+                "real-time location access; this tool provides that capability."
             ),
             "parameters": {
                 "type": "object",
