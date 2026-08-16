@@ -63,6 +63,52 @@ GEOIP_DB_PATH = BASE_DIR / "geoip" / "GeoLite2-City.mmdb"
 IP_ECHO_URL = "https://api.ipify.org"  # returns plain-text IP only, no location computed server-side
 REQUEST_TIMEOUT_SECONDS = 5
 
+NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
+NOMINATIM_HEADERS = {
+    "User-Agent": "Local-Jarvis/1.0 (personal local-first AI assistant)"
+}
+
+
+def _reverse_geocode(lat: float, lon: float) -> dict:
+    try:
+        response = requests.get(
+            NOMINATIM_REVERSE_URL,
+            params={
+                "lat": lat,
+                "lon": lon,
+                "format": "jsonv2",
+                "addressdetails": 1,
+            },
+            headers=NOMINATIM_HEADERS,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        data = response.json()
+    except (requests.RequestException, ValueError):
+        return {
+            "city": None,
+            "region": None,
+            "country": None,
+        }
+    address = data.get("address", {})
+    city = (
+        address.get("city")
+        or address.get("town")
+        or address.get("municipality")
+        or address.get("village")
+    )
+    region = (
+        address.get("state")
+        or address.get("state_district")
+        or address.get("county")
+    )
+    country = address.get("country")
+    return {
+        "city": city,
+        "region": region,
+        "country": country,
+    }
+
 
 def _windows_coordinates() -> dict:
     try:
@@ -100,6 +146,11 @@ def _windows_coordinates() -> dict:
         return city, region, country, lat, lon
 
     city, region, country, lat, lon = asyncio.run(_query())
+    if not city and not region and not country:
+        address = _reverse_geocode(lat, lon)
+        city = address["city"]
+        region = address["region"]
+        country = address["country"]
     return {"lat": lat, "lon": lon, "city": city, "region": region, "country": country, "source": "Windows Location Services"}
 
 
