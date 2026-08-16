@@ -34,7 +34,7 @@ def test_read_only_tools_are_not_marked_risky():
         "list_windows", "system_status", "top_processes", "web_search",
         "get_battery_level", "get_location", "add_task", "list_tasks",
         "complete_task", "find_datasheet", "get_now_playing",
-        "mute_jarvis", "unmute_jarvis",
+        "mute_jarvis", "unmute_jarvis", "find_nearby_place", "get_route",
     }
     present = read_only_tools & set(TOOL_FUNCTIONS)
     assert present, "none of the expected read-only tools are even registered -- check the tool name list"
