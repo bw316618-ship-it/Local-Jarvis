@@ -2,6 +2,7 @@ from ollama import Client
 from memory.retriever import JarvisMemory
 from memory.audit_log import log_tool_call
 from memory.conversation_memory import recall, remember_turn, recall_facts
+from memory.shared import get_embedder
 from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
 from config import CONFIG
 
@@ -151,6 +152,17 @@ class JarvisLLM:
     "read visible screen text, monitor system health, search indexed files semantically, work with Git repositories, "
     "and search the web when current information is required.\n\n"
 
+    "LOCATION AND NEARBY PLACES:\n"
+    "You have live location and nearby-place capabilities.\n"
+    "When the user asks for nearby, nearest, closest, or near-me places, "
+    "you MUST use find_nearby_place rather than answering from general knowledge.\n"
+    "Examples:\n"
+    "- 'What are the nearby cafes?' -> find_nearby_place(category='cafe')\n"
+    "- 'Where is the nearest metro station?' -> find_nearby_place(category='metro station')\n"
+    "- 'Find a nearby pharmacy.' -> find_nearby_place(category='pharmacy')\n"
+    "- 'What restaurants are near me?' -> find_nearby_place(category='restaurant')\n"
+    "Never claim that you lack live mapping data when find_nearby_place is available.\n\n"
+
     "Use tools whenever they materially improve correctness or complete a requested task.\n"
     "Do not describe actions that can instead be performed.\n"
     "Perform them.\n"
@@ -294,13 +306,26 @@ class JarvisLLM:
     def chat(self, user_message: str, on_step=None, on_sentence=None, on_token=None) -> str:
         emit = on_step or _default_on_step
 
-        context_chunks = self.memory.search(user_message)
+        # Encode the query once and reuse it for all three memory lookups
+        # below (RAG context, past-turn recall, remembered facts) instead
+        # of letting each one call the embedder separately on the exact
+        # same string -- that was three real embedding-model inferences
+        # per chat() call, before the LLM call even starts. Falls back to
+        # None (each callee encodes independently) if this fails for any
+        # reason, so a broken embedder degrades the same way it always
+        # has rather than becoming a new hard failure here.
+        try:
+            query_embedding = get_embedder().encode(user_message).tolist()
+        except Exception:
+            query_embedding = None
+
+        context_chunks = self.memory.search(user_message, query_embedding=query_embedding)
         context = "\n\n".join(context_chunks) if context_chunks else "No relevant information was found in local memory."
 
-        past_turns = recall(user_message)
+        past_turns = recall(user_message, query_embedding=query_embedding)
         past_context = "\n\n".join(past_turns) if past_turns else "No relevant past conversation found."
 
-        known_facts = recall_facts(user_message)
+        known_facts = recall_facts(user_message, query_embedding=query_embedding)
         facts_context = "\n".join(known_facts) if known_facts else "No relevant remembered facts found."
 
         messages = [{"role": "system", "content": self.system_prompt}]
