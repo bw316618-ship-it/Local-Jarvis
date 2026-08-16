@@ -92,7 +92,8 @@ def _windows_coordinates() -> dict:
         coord = position.coordinate
         lat = coord.point.position.latitude
         lon = coord.point.position.longitude
-        civic = coord.civic_address
+        # Civic address belongs to Geoposition, not Geocoordinate.
+        civic = position.civic_address
         city = civic.city if civic else None
         region = civic.state if civic else None
         country = civic.country if civic else None
