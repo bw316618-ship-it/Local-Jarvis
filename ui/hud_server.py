@@ -163,7 +163,7 @@ class HUDBridge:
     def _run_http_server(self) -> None:
         try:
             handler = partial(SimpleHTTPRequestHandler, directory=str(STATIC_DIR))
-            self._http_server = ThreadingHTTPServer(("localhost", self.http_port), handler)
+            self._http_server = ThreadingHTTPServer(("0.0.0.0", self.http_port), handler)
             self._http_server.serve_forever()
         except Exception as e:
             print(f"[Jarvis HUD] Static server failed to start: {e}")
@@ -183,7 +183,7 @@ class HUDBridge:
 
         async def serve():
             self._ws_stop_signal = asyncio.Event()
-            async with websockets.serve(handler, "localhost", self.ws_port):
+            async with websockets.serve(handler, "0.0.0.0", self.ws_port):
                 await self._ws_stop_signal.wait()  # runs until stop() signals it
 
         try:
