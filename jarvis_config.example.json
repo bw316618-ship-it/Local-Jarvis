@@ -15,7 +15,7 @@
   "index_chunk_overlap": 50,
   "index_max_file_mb": 20,
   "piper_voice_model": "voices/en_US-amy-medium.onnx",
-  "ors_api_key": "Your-api-key-here",
+  "ors_api_key": null,
   "hud_http_port": 8765,
   "hud_ws_port": 8766
 }
