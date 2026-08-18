@@ -1,31 +1,19 @@
-"""File indexer: chunking, discovery/filtering, incremental indexing,
-the self-indexing collision guard, and batched embedding."""
+"""File indexer: discovery/filtering (including SKIP_DIR_NAMES pruning),
+the self-indexing collision guard, incremental indexing, batched
+embedding, and that search_files only ever searches "discovered" files
+(not manually-ingested ones sharing the same collection)."""
 
+import os
 import time
-from pathlib import Path
+from unittest.mock import MagicMock
 
 import tools.file_index as fi
+from memory import document_store
 
 
 def _patch_state(monkeypatch, tmp_path):
     monkeypatch.setattr(fi, "STATE_PATH", tmp_path / "state.json")
     monkeypatch.setattr(fi, "DB_PATH", tmp_path / "chroma")
-
-
-def test_chunk_text_short_text_is_one_chunk():
-    chunks = list(fi._chunk_text("one two three four five"))
-    assert chunks == ["one two three four five"]
-
-
-def test_chunk_text_empty_yields_nothing():
-    assert list(fi._chunk_text("")) == []
-
-
-def test_chunk_text_long_text_splits_with_overlap():
-    long_text = " ".join(f"word{i}" for i in range(1200))
-    chunks = list(fi._chunk_text(long_text))
-    sizes = [len(c.split()) for c in chunks]
-    assert sizes == [500, 500, 300]
 
 
 def test_file_discovery_filters_correctly(tmp_path, monkeypatch):
@@ -46,6 +34,40 @@ def test_file_discovery_filters_correctly(tmp_path, monkeypatch):
     assert "skip_me.exe" not in found
     assert "ignored.txt" not in found
     assert "huge.txt" not in found
+
+
+def test_skipped_directories_are_pruned_not_just_filtered(tmp_path, monkeypatch):
+    """SKIP_DIR_NAMES folders must never be descended into at all -- the
+    old rglob()-based version filtered them out after the fact, which
+    means rglob had already recursed into (and stat'd every file inside)
+    a node_modules tree before the results were discarded. Checking only
+    the final output (a file inside node_modules is absent) doesn't
+    distinguish "pruned before descending" from "filtered afterward" --
+    both give the same output -- so this spies on os.walk itself to
+    confirm node_modules is never even visited."""
+    _patch_state(monkeypatch, tmp_path)
+    root = tmp_path / "root"
+    root.mkdir()
+    deep = root / "node_modules" / "some_pkg" / "lib"
+    deep.mkdir(parents=True)
+    (deep / "readme.md").write_text("this should never be seen")
+
+    visited_dirs = []
+    real_walk = os.walk
+
+    def spying_walk(top, *args, **kwargs):
+        for dirpath, dirnames, filenames in real_walk(top, *args, **kwargs):
+            visited_dirs.append(dirpath)
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(fi.os, "walk", spying_walk)
+
+    found = list(fi._iter_candidate_files([str(root)]))
+
+    assert found == []
+    assert not any("node_modules" in d for d in visited_dirs), (
+        "node_modules should be pruned before os.walk descends into it, not just filtered afterward"
+    )
 
 
 def test_indexer_never_indexes_its_own_state_file(tmp_path, monkeypatch):
@@ -73,8 +95,8 @@ def test_incremental_indexing_skips_unchanged_files(tmp_path, monkeypatch, fake_
     (root / "a.txt").write_text("alpha")
     (root / "b.txt").write_text("beta")
 
-    monkeypatch.setattr(fi, "_get_collection", lambda: fake_collection)
-    monkeypatch.setattr(fi, "_get_embedder", lambda: fake_embedder)
+    monkeypatch.setattr(document_store, "get_collection", lambda: fake_collection)
+    monkeypatch.setattr(document_store, "get_embedder", lambda: fake_embedder)
 
     fi.index_files(directories=[str(root)])
     assert fake_collection.add.call_count == 2
@@ -91,8 +113,8 @@ def test_incremental_indexing_reindexes_only_the_changed_file(tmp_path, monkeypa
     (root / "a.txt").write_text("alpha")
     (root / "b.txt").write_text("beta")
 
-    monkeypatch.setattr(fi, "_get_collection", lambda: fake_collection)
-    monkeypatch.setattr(fi, "_get_embedder", lambda: fake_embedder)
+    monkeypatch.setattr(document_store, "get_collection", lambda: fake_collection)
+    monkeypatch.setattr(document_store, "get_embedder", lambda: fake_embedder)
 
     fi.index_files(directories=[str(root)])
     time.sleep(0.02)
@@ -101,6 +123,26 @@ def test_incremental_indexing_reindexes_only_the_changed_file(tmp_path, monkeypa
 
     fi.index_files(directories=[str(root)])
     assert fake_collection.add.call_count == 1
+
+
+def test_indexed_chunks_are_tagged_discovered(tmp_path, monkeypatch, fake_collection, fake_embedder):
+    """Regression test: index_files() previously hand-rolled its own
+    write path instead of going through document_store.index_one_file(),
+    and never set the source_type metadata tag at all -- silently
+    breaking search_files()'s ability to filter manual vs. discovered
+    documents apart in the shared collection."""
+    _patch_state(monkeypatch, tmp_path)
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "a.txt").write_text("alpha")
+
+    monkeypatch.setattr(document_store, "get_collection", lambda: fake_collection)
+    monkeypatch.setattr(document_store, "get_embedder", lambda: fake_embedder)
+
+    fi.index_files(directories=[str(root)])
+
+    metadatas = fake_collection.add.call_args.kwargs["metadatas"]
+    assert all(m["source_type"] == document_store.DISCOVERED for m in metadatas)
 
 
 def test_embedding_and_add_are_batched_per_file_not_per_chunk(tmp_path, monkeypatch, fake_collection, fake_embedder):
@@ -113,8 +155,8 @@ def test_embedding_and_add_are_batched_per_file_not_per_chunk(tmp_path, monkeypa
     long_text = " ".join(f"word{i}" for i in range(1200))  # -> 3 chunks
     (root / "big.txt").write_text(long_text)
 
-    monkeypatch.setattr(fi, "_get_collection", lambda: fake_collection)
-    monkeypatch.setattr(fi, "_get_embedder", lambda: fake_embedder)
+    monkeypatch.setattr(document_store, "get_collection", lambda: fake_collection)
+    monkeypatch.setattr(document_store, "get_embedder", lambda: fake_embedder)
 
     fi.index_files(directories=[str(root)])
 
@@ -135,8 +177,8 @@ def test_count_pending_changes_tracks_the_indexing_lifecycle(tmp_path, monkeypat
 
     assert fi.count_pending_changes(directories=[str(root)]) == 2
 
-    monkeypatch.setattr(fi, "_get_collection", lambda: fake_collection)
-    monkeypatch.setattr(fi, "_get_embedder", lambda: fake_embedder)
+    monkeypatch.setattr(document_store, "get_collection", lambda: fake_collection)
+    monkeypatch.setattr(document_store, "get_embedder", lambda: fake_embedder)
     fi.index_files(directories=[str(root)])
 
     assert fi.count_pending_changes(directories=[str(root)]) == 0
@@ -146,3 +188,32 @@ def test_count_pending_changes_tracks_the_indexing_lifecycle(tmp_path, monkeypat
     (root / "c.txt").write_text("new file")
 
     assert fi.count_pending_changes(directories=[str(root)]) == 2
+
+
+def test_search_files_only_searches_discovered_documents(monkeypatch, fake_embedder):
+    """Regression test for the same source_type bug from the other side:
+    search_files() must filter to "discovered" documents, or manually-
+    ingested content (via ingest/ingest.py) sharing the same collection
+    would leak into whole-computer file search results."""
+    collection = MagicMock()
+    collection.count.return_value = 3
+    collection.query.return_value = {
+        "documents": [["some text"]],
+        "metadatas": [[{"source": "x", "filename": "x.txt", "source_type": "discovered"}]],
+    }
+    monkeypatch.setattr(document_store, "get_collection", lambda: collection)
+    monkeypatch.setattr(document_store, "get_embedder", lambda: fake_embedder)
+
+    fi.search_files("anything")
+
+    assert collection.query.call_args.kwargs["where"] == {"source_type": document_store.DISCOVERED}
+
+
+def test_search_files_reports_when_nothing_indexed_yet(monkeypatch):
+    collection = MagicMock()
+    collection.count.return_value = 0
+    monkeypatch.setattr(document_store, "get_collection", lambda: collection)
+
+    result = fi.search_files("anything")
+
+    assert "index your files" in result.lower()

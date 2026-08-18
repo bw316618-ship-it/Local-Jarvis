@@ -10,7 +10,7 @@ from brain.llm import JarvisLLM
 
 
 class FakeMemory:
-    def search(self, q):
+    def search(self, q, **kwargs):
         return []
 
 
@@ -37,7 +37,7 @@ def test_simple_question_skips_plan_and_tools(monkeypatch):
     remembered = []
 
 
-    def fake_chat(model, messages, tools=None, stream=False):
+    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
         return _stream("42", None)
 
     fake_client = MagicMock()
@@ -45,8 +45,8 @@ def test_simple_question_skips_plan_and_tools(monkeypatch):
     jarvis.client = fake_client
 
     monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: remembered.append((u, r)))
-    monkeypatch.setattr(llm_module, "recall", lambda q, k=3: [])
-    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3: [])
+    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
 
     steps = []
     result = jarvis.chat("what is 6*7", on_step=steps.append)
@@ -67,7 +67,7 @@ def test_recalled_context_appears_in_the_actual_prompt(monkeypatch):
     captured = []
 
 
-    def fake_chat(model, messages, tools=None, stream=False):
+    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
         captured.append(messages[1]["content"])
         return _stream("Continuing with JWT.", None)
 
@@ -77,8 +77,8 @@ def test_recalled_context_appears_in_the_actual_prompt(monkeypatch):
     jarvis.client = fake_client
 
     monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
-    monkeypatch.setattr(llm_module, "recall", lambda q, k=3: ["User asked: what auth method\nJarvis answered: We chose JWT."])
-    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3: ["[preference] Prefers concise answers"])
+    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: ["User asked: what auth method\nJarvis answered: We chose JWT."])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: ["[preference] Prefers concise answers"])
 
     jarvis.chat("continue the auth system", on_step=lambda m: None)
 
@@ -96,7 +96,7 @@ def test_plan_is_emitted_for_a_multi_step_request(monkeypatch):
 
     round_count = [0]
 
-    def fake_chat(model, messages, tools=None, stream=False):
+    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
         if tools is None and not stream:
             return {"message": {"content": "1. Check time\n2. Report it"}}
         round_count[0] += 1
@@ -110,8 +110,8 @@ def test_plan_is_emitted_for_a_multi_step_request(monkeypatch):
     jarvis.client = fake_client
 
     monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
-    monkeypatch.setattr(llm_module, "recall", lambda q, k=3: [])
-    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3: [])
+    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
 
     steps = []
     result = jarvis.chat("what time is it and tell me", on_step=steps.append)
@@ -125,7 +125,7 @@ def test_plan_is_emitted_for_a_multi_step_request(monkeypatch):
 def test_sentences_are_streamed_incrementally(monkeypatch):
     jarvis = make_jarvis()
 
-    def fake_chat(model, messages, tools=None, stream=False):
+    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
         return iter(
             [
                 {"message": {"content": "Hello. ", "tool_calls": None}},
@@ -138,8 +138,8 @@ def test_sentences_are_streamed_incrementally(monkeypatch):
     jarvis.client = fake_client
 
     monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
-    monkeypatch.setattr(llm_module, "recall", lambda q, k=3: [])
-    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3: [])
+    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
 
     sentences = []
     result = jarvis.chat("hi", on_sentence=sentences.append)
@@ -158,7 +158,7 @@ def test_memory_is_stored_on_the_round_limit_fallback_path(monkeypatch):
     call_count = [0]
 
 
-    def fake_chat(model, messages, tools=None, stream=False):
+    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
         call_count[0] += 1
         if call_count[0] >= llm_module.MAX_TOOL_ROUNDS:
             return _stream("FALLBACK ANSWER", None)
@@ -170,11 +170,56 @@ def test_memory_is_stored_on_the_round_limit_fallback_path(monkeypatch):
     jarvis.client = fake_client
 
     monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: remembered.append((u, r)))
-    monkeypatch.setattr(llm_module, "recall", lambda q, k=3: [])
-    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3: [])
+    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
 
     result = jarvis.chat("loop forever", on_step=lambda m: None)
 
     assert result == "FALLBACK ANSWER"
 
     assert remembered == [("loop forever", "FALLBACK ANSWER")]
+
+
+def test_query_is_embedded_once_and_reused_across_all_three_lookups(monkeypatch):
+    """Regression test: chat() previously let self.memory.search(),
+    recall(), and recall_facts() each independently encode the identical
+    user_message -- three embedding-model calls per turn for one query
+    vector. It should now encode once and pass the same vector to all
+    three."""
+    jarvis = make_jarvis()
+
+    search_calls = []
+    jarvis.memory.search = lambda q, **kwargs: search_calls.append(kwargs.get("query_embedding")) or []
+
+    recall_calls = []
+    recall_facts_calls = []
+    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: recall_calls.append(kwargs.get("query_embedding")) or [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: recall_facts_calls.append(kwargs.get("query_embedding")) or [])
+    monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
+
+    encode_calls = []
+
+    class FakeEmbedding:
+        def tolist(self):
+            return [0.5, 0.5]
+
+    class FakeEmbedder:
+        def encode(self, text):
+            encode_calls.append(text)
+            return FakeEmbedding()
+
+    monkeypatch.setattr(llm_module, "get_embedder", lambda: FakeEmbedder())
+
+    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
+        return _stream("ok", None)
+
+    fake_client = MagicMock()
+    fake_client.chat.side_effect = fake_chat
+    jarvis.client = fake_client
+
+    jarvis.chat("what's the plan", on_step=lambda m: None)
+
+    assert encode_calls == ["what's the plan"], "should encode the query exactly once"
+    assert search_calls == [[0.5, 0.5]]
+    assert recall_calls == [[0.5, 0.5]]
+    assert recall_facts_calls == [[0.5, 0.5]]

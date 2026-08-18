@@ -1,6 +1,7 @@
-"""Voice: the VAD-based natural-pause recording loop. Deferred imports
-inside the module (sounddevice, openwakeword's VAD) are faked via
-sys.modules since neither has real audio hardware to talk to in CI."""
+"""Voice: the VAD-based natural-pause recording loop, and transcription.
+Deferred imports inside the module (sounddevice, openwakeword's VAD,
+faster-whisper) are faked via sys.modules or direct monkeypatching since
+none of them have real hardware/models to talk to in CI."""
 
 import sys
 from unittest.mock import MagicMock
@@ -102,3 +103,34 @@ def test_listen_dispatches_to_fixed_duration_when_given(monkeypatch):
     assert jarvis_voice.listen() == "vad result"
     assert jarvis_voice.listen(duration=10) == "fixed result"
     assert calls == [("vad",), ("fixed", 10)]
+
+
+def test_transcribe_passes_the_array_directly_to_whisper(monkeypatch):
+    """Regression test: _transcribe() previously wrote the recording out
+    to a temp WAV file and handed faster-whisper a path. It should now
+    pass the float32 array straight through -- faster-whisper's
+    transcribe() accepts one natively, so the temp-file round trip (and
+    the soundfile import it needed) was pure overhead."""
+    jarvis_voice = v.JarvisVoice.__new__(v.JarvisVoice)
+    fake_segment = MagicMock(text="hello world")
+    fake_model = MagicMock()
+    fake_model.transcribe.return_value = ([fake_segment], None)
+    monkeypatch.setattr(jarvis_voice, "_get_stt_model", lambda: fake_model)
+
+    recording = np.zeros(1600, dtype="float32")
+    result = jarvis_voice._transcribe(recording)
+
+    assert result == "hello world"
+    called_arg = fake_model.transcribe.call_args[0][0]
+    assert called_arg is recording, "should pass the array directly, not a file path"
+
+
+def test_transcribe_joins_multiple_segments(monkeypatch):
+    jarvis_voice = v.JarvisVoice.__new__(v.JarvisVoice)
+    fake_model = MagicMock()
+    fake_model.transcribe.return_value = ([MagicMock(text="hello "), MagicMock(text="world")], None)
+    monkeypatch.setattr(jarvis_voice, "_get_stt_model", lambda: fake_model)
+
+    result = jarvis_voice._transcribe(np.zeros(1600, dtype="float32"))
+
+    assert result == "hello  world"
