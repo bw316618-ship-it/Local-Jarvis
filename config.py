@@ -47,6 +47,8 @@ DEFAULTS = {
     # is already using 8765/8766.
     "hud_http_port": 8765,
     "hud_ws_port": 8766,
+    "backend_ws_port": 8770,
+    "device_auth_file": "data/trusted_devices.json",
 }
 
 
