@@ -22,6 +22,15 @@ the tool + arguments, not semantic -- searching for "flask project" and
 interest. Catching near-duplicate phrasing would need embedding-based
 clustering; left as a natural next refinement if exact-match doesn't
 catch enough in practice.
+
+Update: repeated-action/failure detection now clusters by embedding
+similarity (reusing memory/shared.py's shared SentenceTransformer), not
+just exact signature match -- "flask project" and "the flask project
+setup" now land in the same cluster. If embeddings aren't available for
+any reason (model not loaded, unexpected shape, etc.), clustering falls
+back to the original exact-match grouping rather than failing loudly --
+this is a suggestion feature, not something that should ever block
+startup or crash on a bad embedding call.
 """
 
 import json
@@ -77,6 +86,47 @@ def _signature(entry: dict) -> str:
     return f"{tool}::{json.dumps(args, sort_keys=True)}"
 
 
+def _cluster_by_similarity(entries: list, threshold: float = 0.86) -> list:
+    """Group entries whose argument text is semantically close, even if not
+    an exact string match. Falls back to exact-signature grouping if
+    embeddings aren't available or something goes wrong.
+    """
+    try:
+        import numpy as np
+        from memory.shared import get_embedder
+
+        texts = [_signature(e) for e in entries]
+        embedder = get_embedder()
+        vectors = np.array(embedder.encode(texts))
+        if vectors.ndim != 2 or vectors.shape[0] != len(entries):
+            raise ValueError("unexpected embedding shape")
+
+        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+        norms[norms == 0] = 1
+        normalized = vectors / norms
+        sims = normalized @ normalized.T
+
+        assigned = [-1] * len(entries)
+        clusters = []
+        for i in range(len(entries)):
+            if assigned[i] != -1:
+                continue
+            cluster_idx = len(clusters)
+            assigned[i] = cluster_idx
+            members = [i]
+            for j in range(i + 1, len(entries)):
+                if assigned[j] == -1 and sims[i, j] >= threshold:
+                    assigned[j] = cluster_idx
+                    members.append(j)
+            clusters.append([entries[k] for k in members])
+        return clusters
+    except Exception:
+        groups = defaultdict(list)
+        for e in entries:
+            groups[_signature(e)].append(e)
+        return list(groups.values())
+
+
 def _looks_like_failure(entry: dict) -> bool:
     preview = (entry.get("result_preview") or "").lower()
     if not preview:
@@ -85,38 +135,38 @@ def _looks_like_failure(entry: dict) -> bool:
 
 
 def _find_repeated_failures(failed_entries: list) -> list:
-    groups = defaultdict(list)
+    by_tool = defaultdict(list)
     for e in failed_entries:
-        groups[_signature(e)].append(e)
+        by_tool[e.get("tool")].append(e)
 
     suggestions = []
-    for group in groups.values():
-        if len(group) >= FAILURE_THRESHOLD:
-            tool = group[0].get("tool")
-            args = group[0].get("arguments") or {}
-            suggestions.append(
-                f"`{tool}({args})` has failed {len(group)} times in the last "
-                f"{LOOKBACK_DAYS} days. Want help figuring out why?"
-            )
+    for tool, entries in by_tool.items():
+        for cluster in _cluster_by_similarity(entries):
+            if len(cluster) >= FAILURE_THRESHOLD:
+                args = cluster[0].get("arguments") or {}
+                suggestions.append(
+                    f"`{tool}({args})` has failed {len(cluster)} times in the last "
+                    f"{LOOKBACK_DAYS} days. Want help figuring out why?"
+                )
     return suggestions
 
 
 def _find_repeated_actions(successful_entries: list) -> list:
     relevant = [e for e in successful_entries if e.get("tool") in REPEAT_WORTHY_TOOLS]
-    groups = defaultdict(list)
+    by_tool = defaultdict(list)
     for e in relevant:
-        groups[_signature(e)].append(e)
+        by_tool[e.get("tool")].append(e)
 
     suggestions = []
-    for group in groups.values():
-        if len(group) >= REPEAT_THRESHOLD:
-            tool = group[0].get("tool")
-            args = group[0].get("arguments") or {}
-            suggestions.append(
-                f"You've called `{tool}({args})` {len(group)} times in the last "
-                f"{LOOKBACK_DAYS} days. Want this remembered as something to check "
-                f"automatically?"
-            )
+    for tool, entries in by_tool.items():
+        for cluster in _cluster_by_similarity(entries):
+            if len(cluster) >= REPEAT_THRESHOLD:
+                args = cluster[0].get("arguments") or {}
+                suggestions.append(
+                    f"You've called `{tool}({args})` {len(cluster)} times in the last "
+                    f"{LOOKBACK_DAYS} days. Want this remembered as something to check "
+                    f"automatically?"
+                )
     return suggestions
 
 

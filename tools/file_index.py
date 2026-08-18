@@ -28,11 +28,12 @@ from pathlib import Path
 from pypdf import PdfReader
 
 from config import CONFIG
+from memory import document_store
 from memory.shared import get_embedder, get_client
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "memory" / "chroma"
-STATE_PATH = BASE_DIR / "memory" / "file_index_state.json"
+DB_PATH = document_store.BASE_DIR / "memory" / "chroma"
+STATE_PATH = document_store.STATE_PATH  # shared with ingest.py now
 
 CHUNK_SIZE = CONFIG["index_chunk_size"]
 CHUNK_OVERLAP = CONFIG["index_chunk_overlap"]
@@ -63,8 +64,7 @@ def _get_embedder():
 
 
 def _get_collection():
-    client = get_client()
-    return client.get_or_create_collection("jarvis_files")
+    return document_store.get_collection()
 
 
 def _load_state() -> dict:

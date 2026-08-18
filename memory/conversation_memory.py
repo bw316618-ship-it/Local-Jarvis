@@ -26,6 +26,11 @@ the one exception: it opens its own PersistentClient directly rather than
 going through the shared one, since it's a rare, destructive operation
 (deleting whole collections) and there's no benefit to sharing a
 long-lived client for that.
+
+recall()/recall_facts() both accept an optional `query_embedding` so a
+caller that's already encoding the same query string elsewhere in the
+same turn (brain/llm.py) can pass the vector through once instead of
+paying for a redundant embedding inference per call.
 """
 
 from datetime import datetime, timezone
@@ -86,15 +91,14 @@ def remember_turn(user_message: str, assistant_reply: str) -> None:
         pass
 
 
-def recall(query: str, k: int = DEFAULT_RECALL_K) -> list:
+def recall(query: str, k: int = DEFAULT_RECALL_K, query_embedding: list = None) -> list:
     """Return up to k past turns semantically relevant to `query`."""
     try:
         collection = _get_collection()
         if collection.count() == 0:
             return []
 
-        embedder = _get_embedder()
-        embedding = embedder.encode(query).tolist()
+        embedding = query_embedding if query_embedding is not None else _get_embedder().encode(query).tolist()
         results = collection.query(
             query_embeddings=[embedding],
             n_results=min(k, collection.count()),
@@ -133,15 +137,14 @@ def remember_fact(category: str, fact: str) -> str:
         return f"Could not save that: {e}"
 
 
-def recall_facts(query: str, k: int = DEFAULT_FACTS_RECALL_K) -> list:
+def recall_facts(query: str, k: int = DEFAULT_FACTS_RECALL_K, query_embedding: list = None) -> list:
     """Return up to k stored facts semantically relevant to `query`."""
     try:
         collection = _get_facts_collection()
         if collection.count() == 0:
             return []
 
-        embedder = _get_embedder()
-        embedding = embedder.encode(query).tolist()
+        embedding = query_embedding if query_embedding is not None else _get_embedder().encode(query).tolist()
         results = collection.query(
             query_embeddings=[embedding],
             n_results=min(k, collection.count()),

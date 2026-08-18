@@ -13,7 +13,9 @@ often more annoying to undo than a file operation.
 import subprocess
 from pathlib import Path
 
-TIMEOUT_SECONDS = 30
+from config import CONFIG
+
+TIMEOUT_SECONDS = CONFIG["command_timeout_seconds"]
 
 
 def _run_git(args, repo_path="."):

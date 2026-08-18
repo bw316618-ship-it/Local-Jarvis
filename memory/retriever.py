@@ -1,3 +1,4 @@
+from memory import document_store
 from memory.shared import get_embedder, get_client
 
 
@@ -9,27 +10,13 @@ class JarvisMemory:
         self.embedder = get_embedder()
         self.client = get_client()
 
-        # get_or_create_collection avoids a crash on first run, before
-        # ingest.py has ever been executed and the collection exists.
-        self.collection = self.client.get_or_create_collection(
-            name="jarvis_memory"
-        )
+        # Use the shared document store collection for indexed documents.
+        self.collection = document_store.get_collection()
 
-    def search(self, query: str, k: int = 5):
-        # Nothing has been ingested yet -- don't bother querying.
-        if self.collection.count() == 0:
-            return []
-
-        embedding = self.embedder.encode(query).tolist()
-
-        results = self.collection.query(
-            query_embeddings=[embedding],
-            n_results=min(k, self.collection.count())
-        )
-
-        documents = results.get("documents", [[]])
-
-        if not documents or len(documents[0]) == 0:
-            return []
-
-        return documents[0]
+    def search(self, query: str, k: int = 5, query_embedding: list = None):
+        return document_store.search(
+            query,
+            source_type=document_store.MANUAL,
+            k=k,
+            query_embedding=query_embedding,
+        )["documents"]

@@ -2,12 +2,18 @@ from ollama import Client
 from memory.retriever import JarvisMemory
 from memory.audit_log import log_tool_call
 from memory.conversation_memory import recall, remember_turn, recall_facts
+from memory.shared import get_embedder
 from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
 from config import CONFIG
 
-<<<<<<< HEAD
 MAX_TOOL_ROUNDS = CONFIG["max_tool_rounds"]
 SHORT_TERM_TURNS = CONFIG["short_term_turns"]
+
+# Passed as `options` on every Ollama chat call -- previously defined in
+# config.py/jarvis_config.json but never actually wired through, so
+# overriding it had no effect. Kept as a module-level dict (not built fresh
+# per call) since it's the same on every request.
+_CHAT_OPTIONS = {"num_ctx": CONFIG["num_ctx"]}
 
 # Rough, cheap heuristic for "does this need a plan" -- avoids paying for a
 # whole extra model round-trip on every single message (greetings, quick
@@ -31,29 +37,14 @@ def _looks_like_multi_step(message: str) -> bool:
 
 
 def _default_confirm(name: str, arguments: dict) -> bool:
-=======
-# Safety valve: caps how many tool-call round-trips happen for a single
-# user message. Raised from 6 -- genuinely multi-step tasks (create a
-# project, run it, fix errors, commit) need more turns than a quick
-# lookup does. Configurable via jarvis_config.json ("max_tool_rounds").
-MAX_TOOL_ROUNDS = CONFIG["max_tool_rounds"]
 
-
-def _default_confirm(name: str, arguments: dict) -> bool:
-    """Fallback confirmation prompt, used if the caller doesn't supply one.
-
-    Defaults to a plain input() prompt rather than auto-approving, since a
-    risky tool with no confirmation path at all would silently defeat the
-    whole point of RISKY_TOOLS.
-    """
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
     print(f"\nJarvis wants to run '{name}' with arguments: {arguments}")
     answer = input("Allow this? [y/N] ").strip().lower()
     return answer == "y"
 
 
 def _default_on_step(message: str) -> None:
-<<<<<<< HEAD
+
     print(message)
 
 
@@ -61,12 +52,7 @@ def _default_on_sentence(sentence: str) -> None:
     print(sentence, end=" ", flush=True)
 
 
-=======
-    """Fallback progress reporter, used if the caller doesn't supply one."""
-    print(message)
 
-
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
 class JarvisLLM:
     def __init__(self, model=None, confirm_callback=None):
         self.client = Client(host="http://localhost:11434")
@@ -74,7 +60,7 @@ class JarvisLLM:
         self.memory = JarvisMemory()
         self.confirm_callback = confirm_callback or _default_confirm
 
-<<<<<<< HEAD
+
         # Rolling short-term memory: the last few (user, jarvis) turns of
         # THIS session, kept verbatim in every prompt. This is deliberately
         # separate from memory/conversation_memory.py's semantic recall --
@@ -85,91 +71,130 @@ class JarvisLLM:
         # history rather than something retrieved.
         self.short_term = []
 
-=======
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
-        self.system_prompt = (
-            "You are Jarvis, a local-first AI assistant with broad access to "
-            "my laptop, running mostly offline.\n"
-            "You answer questions using the provided context when it's relevant.\n"
-<<<<<<< HEAD
-            "The most recent turns of THIS conversation appear directly above "
-            "as message history -- use them to resolve vague or pronoun-heavy "
-            "follow-ups ('open it', 'make that louder', 'try again') against "
-            "whatever was just discussed or just ran.\n"
-=======
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
-            "You may also be given snippets of relevant past conversation from "
-            "earlier sessions -- use them for continuity (e.g. if asked to "
-            "'continue the authentication system', check whether a past turn "
-            "already covers what was decided or where things were left off), "
-            "but don't assume every snippet is relevant just because it's "
-            "present; ignore ones that don't actually help.\n"
-            "You may also be given facts remembered from earlier sessions "
-            "(people, preferences, project details) -- treat these as things "
-            "you already know about the user. When the user tells you "
-            "something durable worth remembering long-term -- a person in "
-            "their life, a preference, a project detail, a decision -- call "
-            "remember_fact to store it. Don't call it for one-off trivia that "
-            "doesn't need to persist.\n"
-<<<<<<< HEAD
-            "You have tools to manage files (including renaming, moving, and "
-            "organizing them into subfolders by type), run system commands, "
-            "control the mouse and keyboard, list/focus/minimize/close "
-            "windows by title, open applications, search the web, work with "
-            "git repos, read text visible on screen, check system health "
-            "(CPU/memory/disk/top processes), and semantically search "
-            "files already indexed on this machine (search_files) -- use "
-            "search_files, not just list_directory, when asked to find a file "
-            "by what it's about rather than its exact name or location, and "
-            "use find_text_on_screen before mouse_click when you need to "
-            "click something by its visible label rather than a coordinate "
-            "you already know.\n"
-=======
-            "You have tools to manage files (including creating, renaming, "
-            "moving, and organizing them into subfolders by type), run "
-            "system commands, control the mouse and keyboard, list/focus/"
-            "minimize/close windows by title, open applications, search the "
-            "web, work with git repos, read text visible on screen, describe "
-            "images or the screen's visual content, check system health "
-            "(CPU/memory/disk/top processes), and semantically search "
-            "files already indexed on this machine (search_files) -- use "
-            "search_files, not just list_directory, when asked to find a file "
-            "by what it's about rather than its exact name or location, use "
-            "find_text_on_screen before mouse_click when you need to click "
-            "something by its visible label rather than a coordinate you "
-            "already know, and use create_directory (never move_file or any "
-            "other workaround) when asked to make a new empty folder.\n"
-            "Always use the tool that's actually built for what's being asked "
-            "rather than improvising a workaround with a different tool -- if "
-            "no tool fits, say so plainly instead of forcing one to fit.\n"
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
-            "Only call a tool when it's genuinely needed to answer accurately "
-            "or complete a requested action. Greetings, small talk, opinions, "
-            "thanks, and general knowledge you already know get a plain reply "
-            "with no tool call at all -- 'Hello', 'thanks', 'what's the "
-            "capital of France' need nothing but an answer. Reach for "
-            "web_search only when the task genuinely needs current or "
-            "external information (e.g. today's news, a live score, "
-            "something after your training data) -- never for a bare "
-            "greeting or something you can already answer. When a tool "
-            "really is needed, actually call it rather than describing what "
-            "you would do.\n"
-<<<<<<< HEAD
-            "Keep replies concise and conversational, the way a sharp "
-            "assistant speaking out loud would -- lead with the answer, skip "
-            "preamble, expand only if the user actually needs the detail.\n"
-=======
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
-            "Some tools require the user's explicit confirmation before they "
-            "run. If one is declined, tell the user and suggest an alternative "
-            "rather than trying to achieve the same thing a different way "
-            "without asking.\n"
-            "If you were given a numbered plan, follow it step by step, one "
-            "tool call at a time, adjusting if a step's result changes what's "
-            "needed -- the plan is a guide, not a script to follow blindly if "
-            "something unexpected happens.\n"
-        )
 
+        self.system_prompt = (
+    "You are J.A.R.V.I.S., the persistent operating intelligence of a local-first AI assistant running primarily offline on the user's computer.\n\n"
+
+    "You are not a chatbot, customer support representative, or roleplaying a fictional character. "
+    "You are the operating intelligence responsible for understanding intent, maintaining context, "
+    "coordinating available capabilities, and completing work efficiently.\n\n"
+
+    "Your priorities, in order:\n"
+    "1. Prevent irreversible mistakes.\n"
+    "2. Preserve the user's time and attention.\n"
+    "3. Complete the user's objective.\n"
+    "4. Reduce unnecessary interaction.\n"
+    "5. Maintain conversational continuity.\n\n"
+
+    "Treat the desktop, applications, files, conversations, memories, and system state as one continuous environment. "
+    "Every interaction continues an existing relationship rather than beginning a new chat.\n\n"
+
+    "The most recent turns of THIS conversation appear directly above as message history. "
+    "Use them to resolve follow-up requests and ambiguous references.\n\n"
+
+    "You may also receive snippets from previous conversations. "
+    "Use them only when genuinely relevant for continuity.\n\n"
+
+    "You may also receive remembered long-term facts about the user. "
+    "Treat them as existing knowledge.\n\n"
+
+    "When the user shares durable information that should persist across future conversations "
+    "(preferences, long-term projects, recurring workflows, important people, or lasting decisions), "
+    "call remember_fact. "
+    "Do not store temporary information, transient tasks, or one-off details.\n\n"
+
+    "Personality:\n"
+    "- Speak with quiet confidence.\n"
+    "- Remain calm regardless of the situation.\n"
+    "- Be observant.\n"
+    "- Be concise.\n"
+    "- Use dry, understated wit sparingly and only when it naturally fits.\n"
+    "- Treat the user as highly competent.\n"
+    "- Correct mistakes politely and directly.\n"
+    "- Challenge poor decisions only when they introduce meaningful risk or cost.\n"
+    "- Never flatter.\n"
+    "- Never become emotionally expressive.\n"
+    "- Never exaggerate.\n"
+    "- Never imitate internet personalities.\n\n"
+
+    "Communication:\n"
+    "- Lead with the answer.\n"
+    "- Use complete natural sentences.\n"
+    "- Expand only when additional detail materially improves the answer.\n"
+    "- Prefer observations over explanations.\n"
+    "- Never narrate obvious reasoning.\n"
+    "- Never overexplain familiar concepts.\n"
+    "- Avoid conversational filler such as 'Absolutely', 'Of course', 'Certainly', "
+    "'Great question', 'I'd be happy to', or 'No problem'.\n"
+    "- Do not end every response with a question.\n"
+    "- Speak only when communication improves the outcome.\n"
+    "- Silence is preferable to unnecessary conversation.\n\n"
+
+    "Reason thoroughly before responding.\n"
+    "Keep internal reasoning private unless explicitly requested.\n"
+    "Never present assumptions as facts.\n"
+    "If uncertain, distinguish facts, assumptions, and unknowns.\n\n"
+
+    "Take initiative only when there is clear value.\n"
+    "Volunteer information only if it will:\n"
+    "- prevent a mistake\n"
+    "- save meaningful time\n"
+    "- avoid repeated work\n"
+    "- surface information the user is very likely to need next\n"
+    "- warn about an important consequence before it occurs\n"
+    "Remain silent otherwise.\n\n"
+
+    "Notice patterns.\n"
+    "Mention significant observations once.\n"
+    "Do not repeatedly remind the user unless circumstances change.\n\n"
+
+    "You have tools to manage files, execute system commands, control applications, windows, mouse, keyboard, "
+    "read visible screen text, monitor system health, search indexed files semantically, work with Git repositories, "
+    "and search the web when current information is required.\n\n"
+
+    "LOCATION AND NEARBY PLACES:\n"
+    "You have live location and nearby-place capabilities.\n"
+    "When the user asks for nearby, nearest, closest, or near-me places, "
+    "you MUST use find_nearby_place rather than answering from general knowledge.\n"
+    "Examples:\n"
+    "- 'What are the nearby cafes?' -> find_nearby_place(category='cafe')\n"
+    "- 'Where is the nearest metro station?' -> find_nearby_place(category='metro station')\n"
+    "- 'Find a nearby pharmacy.' -> find_nearby_place(category='pharmacy')\n"
+    "- 'What restaurants are near me?' -> find_nearby_place(category='restaurant')\n"
+    "Never claim that you lack live mapping data when find_nearby_place is available.\n\n"
+
+    "Use tools whenever they materially improve correctness or complete a requested task.\n"
+    "Do not describe actions that can instead be performed.\n"
+    "Perform them.\n"
+    "Use the fewest tools necessary.\n"
+    "Avoid redundant tool calls.\n\n"
+
+    "Do not call tools for:\n"
+    "- greetings\n"
+    "- casual conversation\n"
+    "- opinions\n"
+    "- writing that requires no external information\n"
+    "- general knowledge you already know\n\n"
+
+    "Use web search only when the answer depends on current or external information.\n\n"
+
+    "If a tool requires confirmation, obtain confirmation before using it.\n"
+    "If confirmation is denied, do not attempt to bypass the restriction using another tool.\n\n"
+
+    "When given a numbered plan, execute it one step at a time, adapting when results require changes rather than following it mechanically.\n\n"
+
+    "If multiple actions are required:\n"
+    "- Determine dependencies.\n"
+    "- Execute in the safest order.\n"
+    "- Recover from recoverable failures.\n"
+    "- Report only meaningful progress.\n\n"
+
+    "Never claim an action has been completed unless it actually has.\n"
+    "Never invent capabilities.\n"
+    "State limitations plainly.\n\n"
+
+    "Your defining characteristics are competence, restraint, judgment, anticipation, and quiet confidence."
+)
     def _run_tool_call(self, tool_call) -> str:
         name = tool_call["function"]["name"]
         arguments = tool_call["function"].get("arguments") or {}
@@ -201,26 +226,10 @@ class JarvisLLM:
         return result
 
     def _make_plan(self, user_message: str) -> str:
-<<<<<<< HEAD
+
         planning_messages = [
             {"role": "system", "content": "You are planning, not executing. Do not call any tools here."},
-=======
-        """Ask the model, with tools disabled, whether this request needs
-        more than one step -- and if so, sketch a short plan.
 
-        This runs as a separate, tool-free call rather than folding planning
-        into the main loop, so the model can't short-circuit straight to a
-        tool call before thinking about the shape of the whole task. Simple
-        requests get "No plan needed" and skip straight past this.
-        """
-        planning_messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are planning, not executing. Do not call any tools here."
-                ),
-            },
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
             {
                 "role": "user",
                 "content": (
@@ -234,8 +243,8 @@ class JarvisLLM:
                 ),
             },
         ]
-<<<<<<< HEAD
-        response = self.client.chat(model=self.model, messages=planning_messages)
+
+        response = self.client.chat(model=self.model, messages=planning_messages, options=_CHAT_OPTIONS)
         return response["message"]["content"].strip()
 
     def _stream_round(self, messages, tools, on_token=None, on_sentence=None):
@@ -255,7 +264,9 @@ class JarvisLLM:
         buffer = ""
         tool_calls = None
 
-        stream = self.client.chat(model=self.model, messages=messages, tools=tools, stream=True)
+        stream = self.client.chat(
+            model=self.model, messages=messages, tools=tools, stream=True, options=_CHAT_OPTIONS
+        )
         for chunk in stream:
             message = chunk["message"]
             delta = message.get("content") or ""
@@ -295,55 +306,32 @@ class JarvisLLM:
     def chat(self, user_message: str, on_step=None, on_sentence=None, on_token=None) -> str:
         emit = on_step or _default_on_step
 
-        context_chunks = self.memory.search(user_message)
+        # Encode the query once and reuse it for all three memory lookups
+        # below (RAG context, past-turn recall, remembered facts) instead
+        # of letting each one call the embedder separately on the exact
+        # same string -- that was three real embedding-model inferences
+        # per chat() call, before the LLM call even starts. Falls back to
+        # None (each callee encodes independently) if this fails for any
+        # reason, so a broken embedder degrades the same way it always
+        # has rather than becoming a new hard failure here.
+        try:
+            query_embedding = get_embedder().encode(user_message).tolist()
+        except Exception:
+            query_embedding = None
+
+        context_chunks = self.memory.search(user_message, query_embedding=query_embedding)
         context = "\n\n".join(context_chunks) if context_chunks else "No relevant information was found in local memory."
 
-        past_turns = recall(user_message)
+        past_turns = recall(user_message, query_embedding=query_embedding)
         past_context = "\n\n".join(past_turns) if past_turns else "No relevant past conversation found."
 
-        known_facts = recall_facts(user_message)
+        known_facts = recall_facts(user_message, query_embedding=query_embedding)
         facts_context = "\n".join(known_facts) if known_facts else "No relevant remembered facts found."
 
         messages = [{"role": "system", "content": self.system_prompt}]
         messages.extend(self.short_term)
         messages.append(
-=======
-        # think=False: qwen3 is a hybrid reasoning model that generates a
-        # chain-of-thought by default before answering. That's pure overhead
-        # for a yes/no planning check, and for the main tool-calling loop
-        # it's actively counterproductive: reasoning tokens can end up as
-        # the *final* content instead of a real tool call (the model
-        # narrates "I should call X" in prose rather than emitting a
-        # tool_calls entry), which is what silently no-ops actions like
-        # "create a folder" instead of running them. Every chat() call in
-        # this file passes think=False for both speed and correctness.
-        response = self.client.chat(model=self.model, messages=planning_messages, think=False)
-        return response["message"]["content"].strip()
 
-    def chat(self, user_message: str, on_step=None) -> str:
-        emit = on_step or _default_on_step
-
-        context_chunks = self.memory.search(user_message)
-        if context_chunks:
-            context = "\n\n".join(context_chunks)
-        else:
-            context = "No relevant information was found in local memory."
-
-        past_turns = recall(user_message)
-        if past_turns:
-            past_context = "\n\n".join(past_turns)
-        else:
-            past_context = "No relevant past conversation found."
-
-        known_facts = recall_facts(user_message)
-        if known_facts:
-            facts_context = "\n".join(known_facts)
-        else:
-            facts_context = "No relevant remembered facts found."
-
-        messages = [
-            {"role": "system", "content": self.system_prompt},
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
             {
                 "role": "user",
                 "content": (
@@ -352,7 +340,7 @@ class JarvisLLM:
                     f"Known facts about the user/their projects:\n{facts_context}\n\n"
                     f"Question:\n{user_message}"
                 ),
-<<<<<<< HEAD
+
             }
         )
 
@@ -364,23 +352,12 @@ class JarvisLLM:
                 emit(f"Plan:\n{plan_text}")
                 messages.append({"role": "assistant", "content": f"My plan:\n{plan_text}"})
                 messages.append({"role": "user", "content": "Now carry out the plan, one tool call at a time."})
-=======
-            },
-        ]
 
-        plan_text = self._make_plan(user_message)
-        has_plan = bool(plan_text) and "no plan needed" not in plan_text.lower()
-
-        if has_plan:
-            emit(f"Plan:\n{plan_text}")
-            messages.append({"role": "assistant", "content": f"My plan:\n{plan_text}"})
-            messages.append({"role": "user", "content": "Now carry out the plan, one tool call at a time."})
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
 
         reply = None
 
         for _ in range(MAX_TOOL_ROUNDS):
-<<<<<<< HEAD
+
             content, tool_calls = self._stream_round(messages, TOOL_SCHEMAS, on_token=on_token, on_sentence=on_sentence)
 
             if not tool_calls:
@@ -388,26 +365,7 @@ class JarvisLLM:
                 break
 
             messages.append({"role": "assistant", "content": content, "tool_calls": tool_calls})
-=======
-            response = self.client.chat(
-                model=self.model,
-                messages=messages,
-                tools=TOOL_SCHEMAS,
-                think=False,
-            )
 
-            message = response["message"]
-            tool_calls = message.get("tool_calls")
-
-            if not tool_calls:
-                reply = message["content"]
-                break
-
-            # Record the assistant's tool-call request, run each tool it
-            # asked for (with confirmation for risky ones), and feed the
-            # results back for a follow-up turn.
-            messages.append(message)
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
 
             for tool_call in tool_calls:
                 name = tool_call["function"]["name"]
@@ -415,7 +373,7 @@ class JarvisLLM:
                 emit(f"Step: {name}({args})")
 
                 result = self._run_tool_call(tool_call)
-<<<<<<< HEAD
+
                 messages.append({"role": "tool", "content": result})
 
         if reply is None:
@@ -426,17 +384,3 @@ class JarvisLLM:
         remember_turn(user_message, reply)
         self._update_short_term(user_message, reply)
         return reply
-=======
-                messages.append({
-                    "role": "tool",
-                    "content": result,
-                })
-
-        if reply is None:
-            # Hit the round limit -- ask for a final answer without more tools.
-            final = self.client.chat(model=self.model, messages=messages, think=False)
-            reply = final["message"]["content"]
-
-        remember_turn(user_message, reply)
-        return reply
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33

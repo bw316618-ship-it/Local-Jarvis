@@ -29,6 +29,11 @@ this adds no new install). No need to guess a duration for "talk
 naturally" -- explicitly passing a duration still works too, for when
 you know you'll need more time regardless of pauses.
 
+speak()/speak_async() check voice/session_state.py's shared mute flag
+before producing any audio -- tools/session_control.py's mute_jarvis/
+unmute_jarvis toggle that flag, so muting silences spoken output without
+touching text replies or the rest of the session.
+
 Imports for the audio/ML libraries are deferred to inside the methods
 rather than the top of this file. That way, if sounddevice, faster-whisper,
 or piper fail to install or load (e.g. no microphone, no speakers, a
@@ -38,16 +43,15 @@ with a clear error explaining why.
 """
 
 import os
-<<<<<<< HEAD
+
 import queue
 import tempfile
 import threading
-=======
-import tempfile
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
+
 from pathlib import Path
 
 from config import CONFIG
+from voice import session_state
 
 # Windows without Developer Mode (or without running as admin) can't create
 # symlinks, so huggingface_hub's model cache falls back to copying files
@@ -73,7 +77,7 @@ class JarvisVoice:
         self._stt_model = None
         self._tts_voice = None
         self._vad = None
-<<<<<<< HEAD
+
         self._speech_queue = queue.Queue()
         self._speech_thread = None
 
@@ -96,7 +100,7 @@ class JarvisVoice:
 
     def speak_async(self, text: str) -> None:
         """Queue `text` to be spoken without blocking the caller."""
-        if not text:
+        if not text or session_state.is_muted():
             return
         self._ensure_speech_worker()
         self._speech_queue.put(text)
@@ -111,8 +115,7 @@ class JarvisVoice:
             self._get_stt_model()
         except Exception:
             pass
-=======
->>>>>>> c35b2f1d0791acab7fbdb12bf5c85137558dca33
+
 
     def _get_stt_model(self):
         if self._stt_model is None:
@@ -296,8 +299,12 @@ class JarvisVoice:
         return self._listen_until_silence()
 
     def speak(self, text: str) -> None:
-        """Speak `text` aloud through the default speaker, via Piper."""
-        if not text:
+        """Speak `text` aloud through the default speaker, via Piper.
+
+        No-ops silently if Jarvis is currently muted (see
+        voice/session_state.py) -- same as an empty `text`, not an error.
+        """
+        if not text or session_state.is_muted():
             return
 
         voice = self._get_tts_voice()

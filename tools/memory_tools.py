@@ -41,3 +41,4 @@ MEMORY_TOOL_SCHEMAS = [
 MEMORY_TOOL_FUNCTIONS = {
     "remember_fact": remember_fact,
 }
+MEMORY_RISKY_TOOLS = {"remember_fact"}

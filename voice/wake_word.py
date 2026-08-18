@@ -12,9 +12,11 @@ itself -- no separate download step, unlike faster-whisper's model.
 Everything here runs fully locally.
 """
 
+from config import CONFIG
+
 CHUNK_SAMPLES = 1280  # 80ms at 16kHz -- what openWakeWord expects per call
 SAMPLE_RATE = 16000
-DEFAULT_THRESHOLD = 0.5
+DEFAULT_THRESHOLD = CONFIG["wake_word_threshold"]
 WAKEWORD_KEY = "hey_jarvis_v0.1"
 
 

@@ -11,7 +11,9 @@ import os
 import platform
 import subprocess
 
-COMMAND_TIMEOUT_SECONDS = 30
+from config import CONFIG
+
+COMMAND_TIMEOUT_SECONDS = CONFIG["command_timeout_seconds"]
 MAX_OUTPUT_CHARS = 4000
 
 

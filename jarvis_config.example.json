@@ -1,6 +1,8 @@
 {
   "model": "qwen3:4b",
+  "num_ctx": 8192,
   "max_tool_rounds": 15,
+  "short_term_turns": 6,
   "whisper_model": "base.en",
   "voice_listen_seconds": 6,
   "voice_silence_seconds": 1.2,
@@ -11,6 +13,9 @@
   "index_roots": null,
   "index_chunk_size": 500,
   "index_chunk_overlap": 50,
-  "index_max_file_mb": 20
+  "index_max_file_mb": 20,
   "piper_voice_model": "voices/en_US-amy-medium.onnx",
+  "ors_api_key": "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImY1YzNhYjY0M2U2MjQ3MWU4NWYxN2QxZmQ0MTEzODdmIiwiaCI6Im11cm11cjY0In0=",
+  "hud_http_port": 8765,
+  "hud_ws_port": 8766
 }

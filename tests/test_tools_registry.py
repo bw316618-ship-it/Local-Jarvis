@@ -30,8 +30,11 @@ def test_read_only_tools_are_not_marked_risky():
         "get_current_time", "calculate", "list_directory", "read_file",
         "list_workspace", "read_any_file", "search_files", "index_files",
         "git_status", "git_log", "git_diff", "git_branch_list",
-        "take_screenshot", "read_screen_text", "find_text_on_screen",
+        "read_screen_text", "find_text_on_screen",
         "list_windows", "system_status", "top_processes", "web_search",
+        "get_battery_level", "get_location", "add_task", "list_tasks",
+        "complete_task", "find_datasheet", "get_now_playing",
+        "mute_jarvis", "unmute_jarvis", "find_nearby_place", "get_route",
     }
     present = read_only_tools & set(TOOL_FUNCTIONS)
     assert present, "none of the expected read-only tools are even registered -- check the tool name list"
@@ -39,14 +42,21 @@ def test_read_only_tools_are_not_marked_risky():
 
 
 def test_state_changing_tools_are_marked_risky():
-    """Tools that change the real filesystem/system/repo/window state
-    should always require confirmation."""
+    """Tools that change the real filesystem/system/repo/window state --
+    or that persist information into every future prompt, or that launch
+    external apps/end the session -- should always require confirmation."""
     should_be_risky = {
         "run_command", "open_application", "write_any_file", "delete_any_file",
         "rename_file", "move_file", "organize_directory",
         "git_add", "git_commit", "git_checkout", "git_push",
         "mouse_click", "keyboard_type", "keyboard_hotkey",
         "focus_window", "minimize_window", "close_window",
+        "take_screenshot",  # writes an arbitrary file to disk
+        "remember_fact",  # persists into every future prompt as "known facts"
+        "delete_task",  # permanent removal from the local calendar store
+        "open_pdf",  # launches an external app/browser
+        "control_media",  # input-simulation / drives an external app
+        "end_session",  # not trivially reversible once the loop exits
     }
     present = should_be_risky & set(TOOL_FUNCTIONS)
     assert present == should_be_risky, f"expected risky tools missing from registry: {should_be_risky - present}"
