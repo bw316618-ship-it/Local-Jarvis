@@ -111,8 +111,27 @@ def _reverse_geocode(lat: float, lon: float) -> dict:
 
 
 def _windows_coordinates() -> dict:
+    """Run the WinRT Geolocation query (which is natively async) on its
+    own dedicated thread with its own event loop, rather than calling
+    asyncio.run() directly on the calling thread.
+
+    get_coordinates() is called from plenty of places that already have
+    an event loop running on the calling thread -- e.g. backend.py's
+    WebSocket handler processes each tool call from inside its own
+    asyncio loop. asyncio.run() refuses to start a second loop on a
+    thread that already has one, which previously either raised or
+    (depending on call path) got swallowed by the try/except in
+    get_coordinates() and silently fell through to the GeoLite2 fallback
+    -- so Windows users calling Jarvis via the backend/HUD always got
+    GeoLite2-level accuracy even though Windows Location Services worked
+    fine when tested standalone. Running the query on its own thread
+    sidesteps that entirely: that thread has no pre-existing loop, so
+    asyncio.run() there is always safe, regardless of what the caller's
+    thread is doing.
+    """
     try:
         import asyncio
+        import threading
 
         from winsdk.windows.devices.geolocation import Geolocator, GeolocationAccessStatus
     except ImportError as e:
@@ -145,7 +164,27 @@ def _windows_coordinates() -> dict:
         country = civic.country if civic else None
         return city, region, country, lat, lon
 
-    city, region, country, lat, lon = asyncio.run(_query())
+    result = {}
+    error = {}
+
+    def worker():
+        try:
+            result["value"] = asyncio.run(_query())
+        except Exception as e:
+            error["value"] = e
+
+    thread = threading.Thread(target=worker, name="windows-location")
+    thread.start()
+    thread.join()
+
+    if "value" in error:
+        raise RuntimeError(
+            f"Windows Location Services failed: {error['value']}"
+        ) from error["value"]
+    if "value" not in result:
+        raise RuntimeError("Windows Location Services returned no result.")
+
+    city, region, country, lat, lon = result["value"]
     if not city and not region and not country:
         address = _reverse_geocode(lat, lon)
         city = address["city"]
