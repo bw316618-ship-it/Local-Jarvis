@@ -11,6 +11,10 @@ Arguments are previewed/truncated the same way results already were --
 `write_file` content, `run_command` strings, `remember_fact` payloads,
 git commit messages, etc. could otherwise end up sitting in plaintext in
 this file indefinitely, well beyond what's useful for an audit trail.
+
+The log is also trimmed once it grows past MAX_LOG_LINES, so both this
+file and memory/insights.py's full-file read on every /insights call and
+every startup stay bounded instead of growing forever over months of use.
 """
 
 import json
@@ -22,6 +26,12 @@ LOG_PATH = BASE_DIR / "memory" / "audit_log.jsonl"
 
 MAX_RESULT_PREVIEW = 200
 MAX_ARG_PREVIEW = 200
+
+MAX_LOG_LINES = 5000
+# Only worth reading/counting the whole file once it's plausibly near the
+# cap -- checked via a cheap stat() on every write rather than a full
+# read, so a normal-sized log pays no extra cost per tool call.
+_TRIM_CHECK_SIZE_BYTES = 1_000_000  # ~1MB is comfortably past 5000 short JSON lines
 
 
 def _preview_arguments(arguments: dict) -> dict:
@@ -37,6 +47,28 @@ def _preview_arguments(arguments: dict) -> dict:
             text = text[:MAX_ARG_PREVIEW] + f"...[{remaining} more chars]"
         previewed[key] = text
     return previewed
+
+
+def _trim_if_needed() -> None:
+    """Keep the audit log from growing without bound. The size check is a
+    cheap stat() so it's safe to call on every write; only once the file
+    is plausibly near MAX_LOG_LINES does this actually read and rewrite
+    it."""
+    try:
+        if LOG_PATH.stat().st_size < _TRIM_CHECK_SIZE_BYTES:
+            return
+        lines = LOG_PATH.read_text(encoding="utf-8").splitlines()
+    except Exception:
+        return
+
+    if len(lines) <= MAX_LOG_LINES:
+        return
+
+    trimmed = lines[-MAX_LOG_LINES:]
+    try:
+        LOG_PATH.write_text("\n".join(trimmed) + "\n", encoding="utf-8")
+    except Exception:
+        pass
 
 
 def log_tool_call(name: str, arguments: dict, risky: bool, approved, result: str) -> None:
@@ -60,6 +92,7 @@ def log_tool_call(name: str, arguments: dict, risky: bool, approved, result: str
         LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(LOG_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
+        _trim_if_needed()
     except Exception:
         pass
 

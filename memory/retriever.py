@@ -13,9 +13,10 @@ class JarvisMemory:
         # Use the shared document store collection for indexed documents.
         self.collection = document_store.get_collection()
 
-    def search(self, query: str, k: int = 5):
+    def search(self, query: str, k: int = 5, query_embedding: list = None):
         return document_store.search(
             query,
             source_type=document_store.MANUAL,
             k=k,
+            query_embedding=query_embedding,
         )["documents"]

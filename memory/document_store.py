@@ -1,11 +1,9 @@
 """
-Shared document indexing for Jarvis's two RAG stores, which previously
-duplicated the same chunk/state/embed logic against two separate
-collections (ingest/ingest.py's "jarvis_memory" for manually-curated
-docs, tools/file_index.py's "jarvis_files" for whole-computer semantic
-search). Both now write into one "jarvis_documents" collection, tagged
-by a `source_type` metadata field ("manual" or "discovered"), with one
-shared state file instead of two near-identical ones.
+Shared document indexing for Jarvis's two RAG stores: ingest/ingest.py's
+manually-curated docs and tools/file_index.py's whole-computer semantic
+search. Both write into one "jarvis_documents" collection, tagged by a
+`source_type` metadata field ("manual" or "discovered"), with one shared
+state file instead of two near-identical ones.
 
 Callers still get separate-feeling behavior (memory/retriever.py only
 ever searches "manual" docs; tools/file_index.py's search_files only
@@ -82,13 +80,17 @@ def index_one_file(path: Path, text: str, source_type: str, chunk_size: int, chu
     return len(chunks)
 
 
-def search(query: str, source_type: str, k: int = 5) -> dict:
+def search(query: str, source_type: str, k: int = 5, query_embedding: list = None) -> dict:
+    """`query_embedding`, if given, is used instead of re-encoding `query`
+    -- callers that already need the same query's embedding elsewhere in
+    the same turn (brain/llm.py encodes it once and reuses it across all
+    three memory lookups) can pass it through instead of paying for a
+    second/third embedding inference on an identical string."""
     collection = get_collection()
     if collection.count() == 0:
         return {"documents": [], "metadatas": []}
 
-    embedder = get_embedder()
-    embedding = embedder.encode(query).tolist()
+    embedding = query_embedding if query_embedding is not None else get_embedder().encode(query).tolist()
     results = collection.query(
         query_embeddings=[embedding],
         n_results=min(k * 3, collection.count()),  # over-fetch, then filter by source_type
