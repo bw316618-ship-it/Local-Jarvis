@@ -40,6 +40,13 @@ BACKEND_WS_PORT = CONFIG["backend_ws_port"]
 
 class JarvisBackend:
     def __init__(self, runtime=None, ws_port=BACKEND_WS_PORT):
+        # `runtime`, if given, is only used as the very first device's
+        # JarvisRuntime (see _get_runtime) -- kept so tests/callers can
+        # still inject a mock. Every device gets its OWN JarvisRuntime
+        # (and therefore its own JarvisLLM / short-term history / risky-
+        # tool confirmation routing) so that two devices talking to Jarvis
+        # at the same time never share conversation state or cross-route
+        # a confirmation prompt to the wrong device.
         self.runtime = runtime or JarvisRuntime()
         self.ws_port = ws_port
 
@@ -62,6 +69,13 @@ class JarvisBackend:
         #   token: str | None,
         # }
         self._pending = {}
+
+        # device_id -> JarvisRuntime, and device_id -> a lock serializing
+        # that device's own messages. Keyed by device_id (not websocket)
+        # so a device that reconnects on a new socket keeps its running
+        # conversation rather than starting a fresh one.
+        self._runtimes = {}
+        self._runtime_locks = {}
 
         self._lock = threading.RLock()
         self._available = False
@@ -602,6 +616,28 @@ class JarvisBackend:
     # Jarvis runtime
     # ------------------------------------------------------------------
 
+    def _get_runtime(self, device_id):
+        """Return the (JarvisRuntime, Lock) pair for a device, creating
+        them on first contact. The lock serializes that ONE device's own
+        messages (so a device firing off two quick messages doesn't race
+        itself); it does not block other devices, who each have their
+        own runtime and lock.
+        """
+        key = device_id or "__unknown__"
+
+        with self._lock:
+            runtime = self._runtimes.get(key)
+            if runtime is None:
+                # Reuse the constructor-provided/default runtime for the
+                # first device only (keeps `JarvisBackend(runtime=...)`
+                # dependency injection working for tests); every device
+                # after that gets a brand-new, fully isolated runtime.
+                runtime = self.runtime if not self._runtimes else JarvisRuntime()
+                self._runtimes[key] = runtime
+                self._runtime_locks[key] = threading.Lock()
+
+            return runtime, self._runtime_locks[key]
+
     def _process_message(
         self,
         text,
@@ -610,23 +646,36 @@ class JarvisBackend:
         if not self._loop:
             return
 
-        future = asyncio.run_coroutine_threadsafe(
-            self._process_message_async(
-                text,
-                websocket,
-            ),
-            self._loop,
-        )
+        with self._lock:
+            device = self._authenticated.get(websocket)
+        device_id = device["device_id"] if device else None
 
-        try:
-            future.result()
-        except Exception:
-            pass
+        runtime, runtime_lock = self._get_runtime(device_id)
+
+        # Held for the duration of this device's turn (including the
+        # blocking future.result() below) so a second fast message from
+        # the SAME device queues up rather than racing this one for
+        # runtime.jarvis.confirm_callback / short_term history.
+        with runtime_lock:
+            future = asyncio.run_coroutine_threadsafe(
+                self._process_message_async(
+                    text,
+                    websocket,
+                    runtime,
+                ),
+                self._loop,
+            )
+
+            try:
+                future.result()
+            except Exception:
+                pass
 
     async def _process_message_async(
         self,
         text,
         websocket,
+        runtime,
     ):
         adapter = BackendSurface(
             self,
@@ -634,7 +683,7 @@ class JarvisBackend:
         )
 
         try:
-            self.runtime.handle_message(
+            runtime.handle_message(
                 text,
                 hud=adapter,
             )
