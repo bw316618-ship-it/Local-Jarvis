@@ -3,8 +3,15 @@
 # Local-Jarvis daemon on macOS/Linux -- the Unix counterpart to
 # start_jarvis_daemon.bat.
 #
-# Runs jarvis_daemon.py: no terminal chat loop, just JarvisLLM + the HUD
-# bridge. A browser tab opens automatically once the daemon is ready.
+# Runs jarvis_backend_daemon.py: no terminal chat loop -- starts BOTH the
+# graphical HUD and the phone/PC device-pairing backend, sharing one
+# Jarvis runtime, so there's only ever one assistant to talk to. A
+# browser tab opens automatically once the daemon is ready.
+#
+# Do NOT also run jarvis_daemon.py alongside this -- that starts a
+# second, separate Jarvis (its own LLM/memory/state) that this one's HUD
+# and paired devices would not share.
+#
 # Voice (/voice, /wake) and terminal-only commands (/log, /save,
 # /insights, etc.) are NOT available here -- those are main.py CLI
 # features. Use start_jarvis.sh instead if you need them.
@@ -14,7 +21,7 @@
 # logs. To let it outlive the terminal that launched it, background/
 # detach it yourself at the OS level, e.g.:
 #   nohup ./start_jarvis_daemon.sh > jarvis_daemon.log 2>&1 &
-# (see jarvis_daemon.py's own docstring for more on backgrounding it)
+# (see jarvis_backend_daemon.py's own docstring for more on backgrounding it)
 #
 # Note for macOS: zip extraction sometimes strips the executable bit, so a
 # double-click might open this in a text editor instead of running it. If
@@ -31,9 +38,9 @@ echo "============================================"
 echo "  Starting Local-Jarvis Daemon"
 echo "============================================"
 echo
-echo "This runs Jarvis headless (no terminal chat loop) with the"
-echo "graphical HUD as the only interface. A browser tab will open"
-echo "automatically once the daemon is ready."
+echo "This runs Jarvis headless (no terminal chat loop): the graphical"
+echo "HUD and the phone/PC device-pairing backend share one Jarvis"
+echo "runtime. A browser tab will open automatically once ready."
 echo
 echo "Voice (/voice, /wake) and terminal-only commands (/log, /save,"
 echo "/insights, etc.) are NOT available in daemon mode -- those are"
@@ -88,9 +95,9 @@ if ! command -v ollama >/dev/null 2>&1; then
 fi
 
 echo
-echo "Launching Jarvis daemon..."
+echo "Launching Jarvis (HUD + backend)..."
 echo
-python3 jarvis_daemon.py
+python3 jarvis_backend_daemon.py
 
 echo
 echo "Jarvis daemon has exited."
