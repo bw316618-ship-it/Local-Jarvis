@@ -12,6 +12,8 @@ supports Windows and macOS, not Linux) -- deferring means the rest of
 Jarvis still works even where this specific capability isn't available.
 """
 
+from functools import wraps
+
 
 def _get_gw():
     try:
@@ -25,13 +27,25 @@ def _get_gw():
     return gw
 
 
+def _catch_backend_unavailable(func):
+    """See tools/desktop_control.py's copy of this decorator for the full
+    rationale -- same shared shape, applied here to _get_gw() instead of
+    _get_pyautogui()."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except RuntimeError as e:
+            return str(e)
+    return wrapper
+
+
+@_catch_backend_unavailable
 def list_windows() -> str:
     """List the titles of all currently open windows."""
+    gw = _get_gw()
     try:
-        gw = _get_gw()
         titles = [t for t in gw.getAllTitles() if t.strip()]
-    except RuntimeError as e:
-        return str(e)
     except Exception as e:
         return f"Could not list windows: {e}"
 
@@ -40,50 +54,47 @@ def list_windows() -> str:
     return "Open windows:\n" + "\n".join(f"- {t}" for t in titles)
 
 
+@_catch_backend_unavailable
 def focus_window(title_substring: str) -> str:
     """Bring the first window matching `title_substring` to the front."""
+    gw = _get_gw()
     try:
-        gw = _get_gw()
         matches = gw.getWindowsWithTitle(title_substring)
         if not matches:
             return f"No open window found matching '{title_substring}'."
         window = matches[0]
         window.activate()
         return f"Focused '{window.title}'."
-    except RuntimeError as e:
-        return str(e)
     except Exception as e:
         return f"Could not focus a window matching '{title_substring}': {e}"
 
 
+@_catch_backend_unavailable
 def minimize_window(title_substring: str) -> str:
     """Minimize the first window matching `title_substring`."""
+    gw = _get_gw()
     try:
-        gw = _get_gw()
         matches = gw.getWindowsWithTitle(title_substring)
         if not matches:
             return f"No open window found matching '{title_substring}'."
         window = matches[0]
         window.minimize()
         return f"Minimized '{window.title}'."
-    except RuntimeError as e:
-        return str(e)
     except Exception as e:
         return f"Could not minimize a window matching '{title_substring}': {e}"
 
 
+@_catch_backend_unavailable
 def close_window(title_substring: str) -> str:
     """Close the first window matching `title_substring`. Can lose unsaved work."""
+    gw = _get_gw()
     try:
-        gw = _get_gw()
         matches = gw.getWindowsWithTitle(title_substring)
         if not matches:
             return f"No open window found matching '{title_substring}'."
         window = matches[0]
         window.close()
         return f"Closed '{window.title}'."
-    except RuntimeError as e:
-        return str(e)
     except Exception as e:
         return f"Could not close a window matching '{title_substring}': {e}"
 
