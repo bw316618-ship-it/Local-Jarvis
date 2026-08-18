@@ -1,38 +1,29 @@
 """
 Local graphical HUD bridge for Jarvis.
 
-Two things live here:
+Step 10/11:
+- Device-aware WebSocket registry.
+- LAN devices are NOT trusted merely because they can reach the port.
+- Localhost PC can bootstrap itself.
+- Unknown LAN devices require approval from an authenticated device.
+- Approved devices receive a random bearer token.
+- Only SHA-256 token hashes are persisted.
+- Revoking a device invalidates its token.
 
-1. The original one-way state broadcast (idle/listening/thinking/
-   speaking/tool/error) that the reactor/storm HUD renders -- unchanged
-   in spirit from the first version of this file.
+Trust database:
+    jarvis_hud_devices.json
 
-2. NEW: a full bidirectional chat channel. A JarvisLLM instance can be
-   "attached" to this bridge (attach_jarvis()) so that messages typed
-   into the HUD page are routed straight to jarvis.chat(), with replies,
-   tool-step announcements, and risky-tool confirmation prompts all
-   streamed back over the same WebSocket. This is what makes the HUD a
-   real second way to talk to Jarvis, not just a display -- see
-   jarvis_daemon.py, which runs a JarvisLLM with *only* this as its
-   interface (no terminal input loop at all), so it can keep running,
-   and keep the browser connected, independent of whether any terminal
-   window is open.
-
-Everything here is still best-effort and silently degrades: if the
-servers can't bind their ports, or `websockets` isn't installed, or
-nothing is connected yet, calls into this module are just no-ops --
-Jarvis's actual functionality never depends on this running. The one new
-exception is confirmation: if a risky tool call is triggered with no
-JarvisLLM attached to route it, or no HUD client connected to answer it,
-request_confirmation() times out and declines, the same fail-safe
-default as an unanswered terminal prompt.
+This file is outside ui/hud/static so the HTTP server cannot serve it.
 """
 
 import asyncio
+import hashlib
 import json
+import secrets
 import threading
 import uuid
 import webbrowser
+from datetime import datetime
 from functools import partial
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
@@ -40,290 +31,1345 @@ from pathlib import Path
 from config import CONFIG
 
 STATIC_DIR = Path(__file__).resolve().parent / "hud" / "static"
+TRUST_DB = Path(__file__).resolve().parent / "jarvis_hud_devices.json"
 
 HTTP_PORT = CONFIG["hud_http_port"]
 WS_PORT = CONFIG["hud_ws_port"]
 
-CONFIRM_TIMEOUT_SECONDS = 120  # how long a risky-tool prompt waits for a browser response
+CONFIRM_TIMEOUT_SECONDS = 120
+AUTH_TIMEOUT_SECONDS = 15
+PAIRING_TIMEOUT_SECONDS = 120
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(
+        token.encode("utf-8")
+    ).hexdigest()
 
 
 class HUDBridge:
-    """Starts the local HTTP + WebSocket servers, lets the rest of Jarvis
-    push state changes to any connected HUD tab, and (once a JarvisLLM is
-    attached) routes chat messages typed into the HUD straight into it.
+    """Local HTTP + authenticated WebSocket bridge."""
 
-    Safe to call any of the public methods even if the servers never
-    started, or nothing is connected -- everything degrades to a no-op
-    rather than raising. start()/stop() are meant to be callable
-    repeatedly across a session (the /hud toggle in main.py), not just
-    once at startup.
-    """
-
-    def __init__(self, http_port: int = HTTP_PORT, ws_port: int = WS_PORT):
+    def __init__(
+        self,
+        http_port: int = HTTP_PORT,
+        ws_port: int = WS_PORT,
+    ):
         self.http_port = http_port
         self.ws_port = ws_port
 
         self._loop = None
         self._clients = set()
+
+        # websocket -> authenticated device
+        self._devices = {}
+
+        # device_id -> websocket
+        self._device_clients = {}
+
+        self._device_lock = threading.RLock()
+
+        self._trusted = self._load_trusted()
+        self._trust_lock = threading.RLock()
+
+        # request_id -> {
+        #   websocket: websocket,
+        #   device: device
+        # }
+        self._pending_access = {}
+        self._pending_access_lock = threading.RLock()
+
         self._http_server = None
         self._ws_stop_signal = None
         self._available = False
 
-        self._jarvis = None
-        self._chat_lock = threading.Lock()  # JarvisLLM isn't written to be
-        # called from more than one thread at once (it mutates
-        # self.short_term); this serializes chat() calls that arrive
-        # from the browser so two fast messages can't interleave.
+        self._runtime = None
+        self._chat_lock = threading.Lock()
 
-        self._pending_confirms = {}  # id -> {"event": threading.Event, "approved": bool|None}
+        self._pending_confirms = {}
         self._pending_confirms_lock = threading.Lock()
+
+    # -- Trust database --------------------------------------------------
+
+    def _load_trusted(self):
+        if not TRUST_DB.exists():
+            return {}
+
+        try:
+            data = json.loads(
+                TRUST_DB.read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            return (
+                data
+                if isinstance(data, dict)
+                else {}
+            )
+        except Exception as e:
+            print(
+                f"[Jarvis HUD] Could not read "
+                f"trust database: {e}"
+            )
+            return {}
+
+    def _save_trusted(self):
+        tmp = TRUST_DB.with_suffix(".tmp")
+
+        tmp.write_text(
+            json.dumps(
+                self._trusted,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        tmp.replace(TRUST_DB)
+
+    def _is_trusted(self, device_id):
+        with self._trust_lock:
+            return device_id in self._trusted
+
+    def _create_trusted_device(
+        self,
+        device,
+        token,
+    ):
+        with self._trust_lock:
+            self._trusted[
+                device["device_id"]
+            ] = {
+                "device_id":
+                    device["device_id"],
+                "device_type":
+                    device["device_type"],
+                "name":
+                    device["name"],
+                "token_hash":
+                    _hash_token(token),
+                "created_at":
+                    datetime.now().isoformat(),
+            }
+
+            self._save_trusted()
+
+    def _authenticate_token(
+        self,
+        device_id,
+        token,
+    ):
+        if not device_id or not token:
+            return False
+
+        with self._trust_lock:
+            record = self._trusted.get(
+                device_id
+            )
+
+            if not record:
+                return False
+
+            stored_hash = record.get(
+                "token_hash",
+                "",
+            )
+
+            return secrets.compare_digest(
+                stored_hash,
+                _hash_token(token),
+            )
+
+    def trusted_devices(self):
+        with self._trust_lock:
+            return [
+                {
+                    "device_id":
+                        item["device_id"],
+                    "device_type":
+                        item["device_type"],
+                    "name":
+                        item["name"],
+                }
+                for item in self._trusted.values()
+            ]
+
+    def revoke_device(
+        self,
+        device_id,
+    ):
+        with self._trust_lock:
+            existed = (
+                device_id
+                in self._trusted
+            )
+
+            if existed:
+                del self._trusted[
+                    device_id
+                ]
+                self._save_trusted()
+
+        if not existed:
+            return False
+
+        with self._device_lock:
+            websocket = (
+                self._device_clients.get(
+                    device_id
+                )
+            )
+
+        if websocket is not None:
+            self._send_to_socket(
+                websocket,
+                {
+                    "type":
+                        "device_revoked",
+                    "device_id":
+                        device_id,
+                },
+            )
+
+            self._close_socket(
+                websocket
+            )
+
+        self._broadcast_device_registry()
+
+        return True
 
     # -- Lifecycle -------------------------------------------------------
 
-    def is_running(self) -> bool:
+    def is_running(self):
         return self._available
 
-    def attach_jarvis(self, jarvis) -> None:
-        """Wire a JarvisLLM instance up to this bridge so chat messages
-        typed into the HUD get routed to it. Without this, the HUD still
-        shows state changes (if something else calls set_state()), but
-        typing into its chat box just gets a 'chat isn't available'
-        response."""
-        self._jarvis = jarvis
+    def attach_runtime(self, runtime):
+        """Attach the transport-independent Jarvis runtime."""
+        self._runtime = runtime
 
-    def start(self, open_browser: bool = True) -> bool:
-        """Start both servers in background threads. Never raises -- a
-        failure here just means the HUD isn't available this session.
-        Returns True if it actually started (or was already running),
-        False if it couldn't (e.g. `websockets` missing)."""
+    # Backward-compatible alias for existing callers.
+    def attach_jarvis(self, jarvis):
+        self.attach_runtime(jarvis)
+
+    def start(
+        self,
+        open_browser=True,
+    ):
         if self._available:
             if open_browser:
-                webbrowser.open(f"http://localhost:{self.http_port}/index.html")
+                webbrowser.open(
+                    f"http://localhost:"
+                    f"{self.http_port}/index.html"
+                )
+
             return True
 
         try:
-            import websockets  # noqa: F401 -- imported here so a missing
-            # package degrades only this feature, not all of Jarvis
+            import websockets
         except ImportError:
-            print("[Jarvis HUD] 'websockets' package not installed -- graphical HUD disabled.")
+            print(
+                "[Jarvis HUD] 'websockets' package "
+                "not installed -- graphical HUD disabled."
+            )
             return False
 
-        threading.Thread(target=self._run_http_server, daemon=True).start()
-        threading.Thread(target=self._run_ws_server, daemon=True).start()
+        threading.Thread(
+            target=self._run_http_server,
+            daemon=True,
+        ).start()
+
+        threading.Thread(
+            target=self._run_ws_server,
+            daemon=True,
+        ).start()
 
         self._available = True
 
         if open_browser:
-            webbrowser.open(f"http://localhost:{self.http_port}/index.html")
+            webbrowser.open(
+                f"http://localhost:"
+                f"{self.http_port}/index.html"
+            )
 
         return True
 
-    def stop(self) -> None:
-        """Shut down both servers cleanly. Safe to call even if the HUD
-        was never started, or is already stopped."""
+    def stop(self):
         if not self._available:
             return
 
         if self._http_server is not None:
             try:
-                self._http_server.shutdown()  # blocks briefly; must be
-                # called from a different thread than serve_forever(),
-                # which is guaranteed here since this always runs off
-                # the WebSocket server's own event-loop thread
+                self._http_server.shutdown()
                 self._http_server.server_close()
             except Exception:
                 pass
+
             self._http_server = None
 
-        if self._loop is not None and self._ws_stop_signal is not None:
+        if (
+            self._loop is not None
+            and self._ws_stop_signal is not None
+        ):
             try:
-                self._loop.call_soon_threadsafe(self._ws_stop_signal.set)
+                self._loop.call_soon_threadsafe(
+                    self._ws_stop_signal.set
+                )
             except Exception:
                 pass
 
-        # Release anything still waiting on a confirmation -- a stopped
-        # HUD can never answer it, so default to declining rather than
-        # hanging a tool call forever. Each waiting request_confirmation()
-        # call pops its own entry once woken (see below) -- we only set
-        # the values and wake it here, rather than clearing the dict
-        # ourselves, so its own cleanup path runs normally instead of
-        # racing this one.
         with self._pending_confirms_lock:
-            for pending in self._pending_confirms.values():
+            for pending in (
+                self._pending_confirms.values()
+            ):
                 pending["approved"] = False
                 pending["event"].set()
+
+        with self._device_lock:
+            self._devices.clear()
+            self._device_clients.clear()
 
         self._loop = None
         self._ws_stop_signal = None
         self._clients = set()
         self._available = False
 
-    # -- HTTP: serves the static HUD page -----------------------------
+    # -- HTTP ------------------------------------------------------------
 
-    def _run_http_server(self) -> None:
+    def _run_http_server(self):
         try:
-            handler = partial(SimpleHTTPRequestHandler, directory=str(STATIC_DIR))
-            self._http_server = ThreadingHTTPServer(("0.0.0.0", self.http_port), handler)
+            handler = partial(
+                SimpleHTTPRequestHandler,
+                directory=str(STATIC_DIR),
+            )
+
+            self._http_server = (
+                ThreadingHTTPServer(
+                    ("0.0.0.0", self.http_port),
+                    handler,
+                )
+            )
+
             self._http_server.serve_forever()
+
         except Exception as e:
-            print(f"[Jarvis HUD] Static server failed to start: {e}")
+            print(
+                f"[Jarvis HUD] Static server "
+                f"failed to start: {e}"
+            )
 
-    # -- WebSocket: state broadcasts + bidirectional chat ----------------
+    # -- Authentication --------------------------------------------------
 
-    def _run_ws_server(self) -> None:
+    def _peer_is_local(self, websocket):
+        try:
+            peer = websocket.remote_address
+            host = (
+                peer[0]
+                if isinstance(peer, tuple)
+                else str(peer)
+            )
+
+            return host in {
+                "127.0.0.1",
+                "::1",
+                "localhost",
+            }
+
+        except Exception:
+            return False
+
+    def _authenticated_clients(self):
+        with self._device_lock:
+            return list(
+                self._devices.keys()
+            )
+
+    def _register_authenticated(
+        self,
+        websocket,
+        device,
+    ):
+        with self._device_lock:
+            old_socket = (
+                self._device_clients.get(
+                    device["device_id"]
+                )
+            )
+
+            if (
+                old_socket is not None
+                and old_socket is not websocket
+            ):
+                self._devices.pop(
+                    old_socket,
+                    None
+                )
+
+                self._clients.discard(
+                    old_socket
+                )
+
+            self._devices[websocket] = dict(
+                device
+            )
+
+            self._device_clients[
+                device["device_id"]
+            ] = websocket
+
+    async def _authenticate_connection(
+        self,
+        websocket,
+        data,
+    ):
+        device_id = str(
+            data.get("device_id")
+            or ""
+        ).strip()
+
+        device_type = str(
+            data.get("device_type")
+            or ""
+        ).strip().lower()
+
+        name = str(
+            data.get("name")
+            or ""
+        ).strip()
+
+        token = str(
+            data.get("token")
+            or ""
+        ).strip()
+
+        if not device_id:
+            await self._send_json(
+                websocket,
+                {
+                    "type":
+                        "auth_error",
+                    "text":
+                        "Missing device ID.",
+                },
+            )
+            return False
+
+        if device_type not in {
+            "pc",
+            "phone",
+        }:
+            device_type = "unknown"
+
+        if not name:
+            name = device_type.upper()
+
+        device = {
+            "device_id":
+                device_id,
+            "device_type":
+                device_type,
+            "name":
+                name,
+        }
+
+        # The local Jarvis PC is the bootstrap authority.
+        if self._peer_is_local(
+            websocket
+        ):
+            if self._is_trusted(
+                device_id
+            ):
+                if not self._authenticate_token(
+                    device_id,
+                    token,
+                ):
+                    await self._send_json(
+                        websocket,
+                        {
+                            "type":
+                                "auth_required",
+                            "text":
+                                "A valid device token is required.",
+                        },
+                    )
+                    return False
+
+                await self._send_json(
+                    websocket,
+                    {
+                        "type":
+                            "auth_granted",
+                        "device":
+                            device,
+                    },
+                )
+
+            else:
+                new_token = (
+                    secrets.token_urlsafe(
+                        32
+                    )
+                )
+
+                self._create_trusted_device(
+                    device,
+                    new_token,
+                )
+
+                await self._send_json(
+                    websocket,
+                    {
+                        "type":
+                            "auth_granted",
+                        "device":
+                            device,
+                        "token":
+                            new_token,
+                        "bootstrap":
+                            True,
+                    },
+                )
+
+            self._register_authenticated(
+                websocket,
+                device,
+            )
+
+            return True
+
+        # LAN device that already has a valid token.
+        if self._authenticate_token(
+            device_id,
+            token,
+        ):
+            await self._send_json(
+                websocket,
+                {
+                    "type":
+                        "auth_granted",
+                    "device":
+                        device,
+                },
+            )
+
+            self._register_authenticated(
+                websocket,
+                device,
+            )
+
+            return True
+
+        # Unknown LAN device: request approval.
+        request_id = str(
+            uuid.uuid4()
+        )
+
+        with self._pending_access_lock:
+            self._pending_access[
+                request_id
+            ] = {
+                "websocket":
+                    websocket,
+                "device":
+                    device,
+            }
+
+        trusted_clients = (
+            self._authenticated_clients()
+        )
+
+        if not trusted_clients:
+            await self._send_json(
+                websocket,
+                {
+                    "type":
+                        "auth_pending",
+                    "request_id":
+                        request_id,
+                    "text":
+                        "No trusted Jarvis device "
+                        "is available to approve this device.",
+                },
+            )
+
+            return False
+
+        request = {
+            "type":
+                "device_access_request",
+            "request_id":
+                request_id,
+            "device":
+                device,
+        }
+
+        for client in trusted_clients:
+            await self._send_json(
+                client,
+                request
+            )
+
+        await self._send_json(
+            websocket,
+            {
+                "type":
+                    "auth_pending",
+                "request_id":
+                    request_id,
+                "text":
+                    "Waiting for approval from a trusted Jarvis device.",
+            },
+        )
+
+        return False
+
+    # -- WebSocket -------------------------------------------------------
+
+    def _run_ws_server(self):
         import websockets
 
         async def handler(websocket):
-            self._clients.add(websocket)
+            self._clients.add(
+                websocket
+            )
+
+            authenticated = False
+
             try:
+                try:
+                    raw = await asyncio.wait_for(
+                        websocket.recv(),
+                        timeout=AUTH_TIMEOUT_SECONDS,
+                    )
+
+                    data = json.loads(raw)
+
+                except Exception:
+                    return
+
+                if data.get(
+                    "type"
+                ) != "authenticate":
+                    await self._send_json(
+                        websocket,
+                        {
+                            "type":
+                                "auth_error",
+                            "text":
+                                "Authentication is required.",
+                        },
+                    )
+
+                    return
+
+                authenticated = (
+                    await self._authenticate_connection(
+                        websocket,
+                        data,
+                    )
+                )
+
+                if not authenticated:
+                    # A pending/denied client never gets access to the
+                    # command channel. Close it after the pairing window.
+                    await asyncio.sleep(
+                        PAIRING_TIMEOUT_SECONDS
+                    )
+
+                    return
+
+                await self._send_json(
+                    websocket,
+                    {
+                        "type":
+                            "device_registry",
+                        "devices":
+                            self.connected_devices(),
+                    },
+                )
+
                 async for raw_message in websocket:
-                    await self._handle_incoming(raw_message)
+                    await self._handle_incoming(
+                        websocket,
+                        raw_message,
+                    )
+
             finally:
-                self._clients.discard(websocket)
+                self._unregister_client(
+                    websocket
+                )
+
+                self._clients.discard(
+                    websocket
+                )
+
+                await self._broadcast_json(
+                    {
+                        "type":
+                            "device_registry",
+                        "devices":
+                            self.connected_devices(),
+                    }
+                )
 
         async def serve():
-            self._ws_stop_signal = asyncio.Event()
-            async with websockets.serve(handler, "0.0.0.0", self.ws_port):
-                await self._ws_stop_signal.wait()  # runs until stop() signals it
+            self._ws_stop_signal = (
+                asyncio.Event()
+            )
+
+            async with websockets.serve(
+                handler,
+                "0.0.0.0",
+                self.ws_port,
+            ):
+                await self._ws_stop_signal.wait()
 
         try:
-            self._loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._loop)
-            self._loop.run_until_complete(serve())
+            self._loop = (
+                asyncio.new_event_loop()
+            )
+
+            asyncio.set_event_loop(
+                self._loop
+            )
+
+            self._loop.run_until_complete(
+                serve()
+            )
+
         except Exception as e:
-            print(f"[Jarvis HUD] WebSocket server failed to start: {e}")
+            print(
+                f"[Jarvis HUD] WebSocket server "
+                f"failed to start: {e}"
+            )
 
-    async def _handle_incoming(self, raw_message: str) -> None:
+    async def _handle_incoming(
+        self,
+        websocket,
+        raw_message,
+    ):
         try:
-            data = json.loads(raw_message)
+            data = json.loads(
+                raw_message
+            )
         except Exception:
-            return  # malformed message from a client -- ignore, don't crash the server
+            return
 
-        msg_type = data.get("type")
+        msg_type = data.get(
+            "type"
+        )
+
+        # Only authenticated sockets reach this method.
+        if msg_type == "device_approval":
+            request_id = data.get(
+                "request_id"
+            )
+
+            approved = bool(
+                data.get(
+                    "approved"
+                )
+            )
+
+            if (
+                self._device_for_websocket(
+                    websocket
+                )
+                is None
+            ):
+                return
+
+            with self._pending_access_lock:
+                pending = (
+                    self._pending_access.pop(
+                        request_id,
+                        None,
+                    )
+                )
+
+            if pending is None:
+                return
+
+            target = pending[
+                "websocket"
+            ]
+
+            device = pending[
+                "device"
+            ]
+
+            if not approved:
+                await self._send_json(
+                    target,
+                    {
+                        "type":
+                            "auth_denied",
+                        "text":
+                            "Device access was denied.",
+                    },
+                )
+
+                self._close_socket(
+                    target
+                )
+
+                return
+
+            token = (
+                secrets.token_urlsafe(
+                    32
+                )
+            )
+
+            self._create_trusted_device(
+                device,
+                token,
+            )
+
+            await self._send_json(
+                target,
+                {
+                    "type":
+                        "auth_granted",
+                    "device":
+                        device,
+                    "token":
+                        token,
+                },
+            )
+
+            # The target receives the token, stores it, then reconnects.
+            self._close_socket(
+                target
+            )
+
+            return
+
+        if msg_type == "revoke_device":
+            if (
+                self._device_for_websocket(
+                    websocket
+                )
+                is None
+            ):
+                return
+
+            self.revoke_device(
+                str(
+                    data.get(
+                        "device_id"
+                    )
+                    or ""
+                )
+            )
+
+            return
 
         if msg_type == "user_message":
-            text = (data.get("text") or "").strip()
+            text = (
+                data.get("text")
+                or ""
+            ).strip()
+
             if not text:
                 return
-            if self._jarvis is None:
-                await self._broadcast_json({
-                    "type": "chat_unavailable",
-                    "text": (
-                        "This HUD session isn't connected to a running Jarvis "
-                        "(it was opened from the terminal CLI, which only "
-                        "broadcasts state, not chat). Run jarvis_daemon.py "
-                        "for browser chat."
-                    ),
-                })
-                return
-            # jarvis.chat() is a blocking call -- run it off the asyncio
-            # loop's thread so it doesn't stall state broadcasts or other
-            # clients' messages while this one is being answered.
-            threading.Thread(target=self._handle_user_message, args=(text,), daemon=True).start()
 
-        elif msg_type == "confirm_response":
-            request_id = data.get("id")
-            approved = bool(data.get("approved"))
+            if self._runtime is None:
+                await self._send_json(
+                    websocket,
+                    {
+                        "type":
+                            "chat_unavailable",
+                        "text":
+                            (
+                                "This HUD session isn't "
+                                "connected to a running Jarvis "
+                                "(it was opened from the terminal "
+                                "CLI, which only broadcasts state, "
+                                "not chat). Run jarvis_daemon.py "
+                                "for browser chat."
+                            ),
+                    },
+                )
+
+                return
+
+            threading.Thread(
+                target=self._handle_user_message,
+                args=(text,),
+                daemon=True,
+            ).start()
+
+            return
+
+        if msg_type == "confirm_response":
+            request_id = data.get(
+                "id"
+            )
+
+            approved = bool(
+                data.get(
+                    "approved"
+                )
+            )
+
             with self._pending_confirms_lock:
-                pending = self._pending_confirms.get(request_id)
+                pending = (
+                    self._pending_confirms.get(
+                        request_id
+                    )
+                )
+
                 if pending is not None:
-                    pending["approved"] = approved
+                    pending["approved"] = (
+                        approved
+                    )
+
                     pending["event"].set()
 
-    def _handle_user_message(self, text: str) -> None:
-        """Runs the shared session handler on a worker thread and streams
-        the reply/state updates back over the HUD channel."""
+    # -- Device registry -------------------------------------------------
+
+    def _unregister_client(
+        self,
+        websocket,
+    ):
+        with self._device_lock:
+            device = self._devices.pop(
+                websocket,
+                None
+            )
+
+            if device:
+                device_id = device[
+                    "device_id"
+                ]
+
+                if (
+                    self._device_clients.get(
+                        device_id
+                    )
+                    is websocket
+                ):
+                    self._device_clients.pop(
+                        device_id,
+                        None,
+                    )
+
+    def _device_for_websocket(
+        self,
+        websocket,
+    ):
+        with self._device_lock:
+            device = self._devices.get(
+                websocket
+            )
+
+            return (
+                dict(device)
+                if device
+                else None
+            )
+
+    def connected_devices(self):
+        with self._device_lock:
+            return [
+                dict(device)
+                for device
+                in self._devices.values()
+            ]
+
+    def send_to_device(
+        self,
+        device_id,
+        payload,
+    ):
+        with self._device_lock:
+            websocket = (
+                self._device_clients.get(
+                    device_id
+                )
+            )
+
+        if websocket is None:
+            return False
+
+        return self._send_to_socket(
+            websocket,
+            payload,
+        )
+
+    def send_to_type(
+        self,
+        device_type,
+        payload,
+    ):
+        device_type = str(
+            device_type
+        ).lower()
+
+        with self._device_lock:
+            sockets = [
+                websocket
+                for websocket, device
+                in self._devices.items()
+                if device[
+                    "device_type"
+                ] == device_type
+            ]
+
+        sent = 0
+
+        for websocket in sockets:
+            if self._send_to_socket(
+                websocket,
+                payload,
+            ):
+                sent += 1
+
+        return sent
+
+    def _broadcast_device_registry(
+        self
+    ):
+        self._broadcast(
+            {
+                "type":
+                    "device_registry",
+                "devices":
+                    self.connected_devices(),
+            }
+        )
+
+    # -- Chat ------------------------------------------------------------
+
+    def _handle_user_message(
+        self,
+        text,
+    ):
         with self._chat_lock:
-            from brain.session import JarvisSession
+            if self._runtime is None:
+                self._broadcast(
+                    {
+                        "type": "error",
+                        "text": "Jarvis runtime is not attached.",
+                    }
+                )
+                return
 
-            session = JarvisSession(self._jarvis, hud=self, broadcast_text=True)
             try:
-                session.handle_message(text)
+                self._runtime.handle_message(
+                    text,
+                    hud=self,
+                )
+
             except Exception as e:
-                self._broadcast({"type": "error", "text": f"Jarvis hit an error: {e}"})
+                self._broadcast(
+                    {
+                        "type":
+                            "error",
+                        "text":
+                            f"Jarvis hit an error: {e}",
+                    }
+                )
+
             finally:
-                self._broadcast({"type": "reply_done"})
+                self._broadcast(
+                    {
+                        "type":
+                            "reply_done",
+                    }
+                )
 
-    def _tool_name_from_step(self, message: str) -> str:
-        body = message[len("Step: "):] if message.startswith("Step: ") else message
-        return body.split("(")[0].strip()
+    def _tool_name_from_step(
+        self,
+        message,
+    ):
+        body = (
+            message[len("Step: "):]
+            if message.startswith(
+                "Step: "
+            )
+            else message
+        )
 
-    def broadcast_tool_step(self, message: str) -> None:
-        if message.startswith("Plan:"):
-            self._broadcast({"type": "plan", "text": message[len("Plan:"):].strip()})
+        return body.split(
+            "("
+        )[0].strip()
+
+    def broadcast_tool_step(
+        self,
+        message,
+    ):
+        if message.startswith(
+            "Plan:"
+        ):
+            self._broadcast(
+                {
+                    "type":
+                        "plan",
+                    "text":
+                        message[
+                            len("Plan:"):
+                        ].strip(),
+                }
+            )
+
             return
-        name = self._tool_name_from_step(message)
-        self.set_state("tool", {"name": name})
-        self._broadcast({"type": "tool_step", "text": message})
 
-    def broadcast_reply_chunk(self, sentence: str) -> None:
-        self.set_state("speaking")
-        self._broadcast({"type": "reply_chunk", "text": sentence})
+        name = (
+            self._tool_name_from_step(
+                message
+            )
+        )
 
-    # -- Confirmation bridge: risky tools ask the browser instead of stdin --
+        self.set_state(
+            "tool",
+            {
+                "name":
+                    name
+            },
+        )
 
-    def request_confirmation(self, name: str, arguments: dict) -> bool:
-        """Blocks the calling thread (the JarvisLLM tool-calling loop's
-        thread) until a connected HUD client answers, or times out.
-        Times out to declined -- same fail-safe default as an unanswered
-        terminal prompt. Declines immediately if the HUD isn't running or
-        nothing is connected, since there's no one to ask."""
-        if not self._available or not self._clients:
-            print(f"[Jarvis HUD] No HUD client connected to confirm '{name}' -- declining.")
+        self._broadcast(
+            {
+                "type":
+                    "tool_step",
+                "text":
+                    message,
+            }
+        )
+
+    def broadcast_reply_chunk(
+        self,
+        sentence,
+    ):
+        self.set_state(
+            "speaking"
+        )
+
+        self._broadcast(
+            {
+                "type":
+                    "reply_chunk",
+                "text":
+                    sentence,
+            }
+        )
+
+    # -- Confirmation ---------------------------------------------------
+
+    def request_confirmation(
+        self,
+        name,
+        arguments,
+    ):
+        if (
+            not self._available
+            or not self._authenticated_clients()
+        ):
+            print(
+                f"[Jarvis HUD] No authenticated HUD "
+                f"client connected to confirm "
+                f"'{name}' -- declining."
+            )
+
             return False
 
-        request_id = str(uuid.uuid4())
+        request_id = str(
+            uuid.uuid4()
+        )
+
         event = threading.Event()
-        with self._pending_confirms_lock:
-            self._pending_confirms[request_id] = {"event": event, "approved": None}
-
-        self._broadcast({"type": "confirm_request", "id": request_id, "tool": name, "args": arguments})
-
-        answered = event.wait(timeout=CONFIRM_TIMEOUT_SECONDS)
 
         with self._pending_confirms_lock:
-            pending = self._pending_confirms.pop(request_id, None)
+            self._pending_confirms[
+                request_id
+            ] = {
+                "event":
+                    event,
+                "approved":
+                    None,
+            }
 
-        if not answered or pending is None:
-            print(f"[Jarvis HUD] Confirmation for '{name}' timed out -- declining.")
+        self._broadcast(
+            {
+                "type":
+                    "confirm_request",
+                "id":
+                    request_id,
+                "tool":
+                    name,
+                "args":
+                    arguments,
+            }
+        )
+
+        answered = event.wait(
+            timeout=
+                CONFIRM_TIMEOUT_SECONDS
+        )
+
+        with self._pending_confirms_lock:
+            pending = (
+                self._pending_confirms.pop(
+                    request_id,
+                    None,
+                )
+            )
+
+        if (
+            not answered
+            or pending is None
+        ):
+            print(
+                f"[Jarvis HUD] Confirmation "
+                f"for '{name}' timed out "
+                f"-- declining."
+            )
+
             return False
 
-        return bool(pending["approved"])
+        return bool(
+            pending["approved"]
+        )
 
-    # -- Broadcasting helpers ---------------------------------------------
+    # -- Sending ---------------------------------------------------------
 
-    async def _broadcast_json(self, payload: dict) -> None:
-        await self._broadcast_raw(json.dumps(payload))
-
-    async def _broadcast_raw(self, payload: str) -> None:
-        if not self._clients:
-            return
-        for ws in list(self._clients):  # snapshot -- a client can disconnect mid-broadcast
-            try:
-                await ws.send(payload)
-            except Exception:
-                self._clients.discard(ws)
-
-    def _broadcast(self, payload: dict) -> None:
-        """Thread-safe broadcast callable from any thread (not just the
-        asyncio loop's own) -- schedules the actual send onto the loop."""
-        if not self._available or self._loop is None:
-            return
+    async def _send_json(
+        self,
+        websocket,
+        payload,
+    ):
         try:
-            asyncio.run_coroutine_threadsafe(self._broadcast_json(payload), self._loop)
+            await websocket.send(
+                json.dumps(payload)
+            )
+
+            return True
+
+        except Exception:
+            self._clients.discard(
+                websocket
+            )
+
+            return False
+
+    def _send_to_socket(
+        self,
+        websocket,
+        payload,
+    ):
+        if (
+            not self._available
+            or self._loop is None
+        ):
+            return False
+
+        try:
+            future = (
+                asyncio.run_coroutine_threadsafe(
+                    self._send_json(
+                        websocket,
+                        payload,
+                    ),
+                    self._loop,
+                )
+            )
+
+            future.result(
+                timeout=2
+            )
+
+            return True
+
+        except Exception:
+            return False
+
+    def _close_socket(
+        self,
+        websocket,
+    ):
+        if self._loop is None:
+            return
+
+        async def close():
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+
+        try:
+            asyncio.run_coroutine_threadsafe(
+                close(),
+                self._loop,
+            )
         except Exception:
             pass
 
-    def set_state(self, state: str, meta: dict = None) -> None:
-        """Broadcast a state change to any connected HUD tab.
+    async def _broadcast_json(
+        self,
+        payload,
+    ):
+        if not self._devices:
+            return
 
-        `state` is one of: 'idle', 'listening', 'thinking', 'speaking',
-        'tool', 'error'. `meta` is optional extra context (e.g. the tool
-        name during 'tool') -- the frontend isn't required to use it.
-        """
-        self._broadcast({"type": "state", "state": state, "meta": meta or {}})
+        message = json.dumps(
+            payload
+        )
+
+        for websocket in list(
+            self._devices.keys()
+        ):
+            try:
+                await websocket.send(
+                    message
+                )
+
+            except Exception:
+                self._unregister_client(
+                    websocket
+                )
+
+                self._clients.discard(
+                    websocket
+                )
+
+    def _broadcast(
+        self,
+        payload,
+    ):
+        if (
+            not self._available
+            or self._loop is None
+        ):
+            return
+
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._broadcast_json(
+                    payload
+                ),
+                self._loop,
+            )
+
+        except Exception:
+            pass
+
+    def set_state(
+        self,
+        state,
+        meta=None,
+    ):
+        self._broadcast(
+            {
+                "type":
+                    "state",
+                "state":
+                    state,
+                "meta":
+                    meta or {},
+            }
+        )
 
 
-# Module-level singleton -- one HUD bridge per Jarvis process, imported
-# and used the same way memory/shared.py's embedder/client singletons are.
 hud = HUDBridge()

@@ -2,11 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Jarvis</title>
+
   <link rel="stylesheet" href="hud.css" />
-  <!-- Resolves the bare 'three' / 'three/addons/' specifiers storm3d.js
-       imports -- required for ES module imports to work at all, and
-       must come before any module script that uses them. -->
+  <link rel="stylesheet" href="mobile.css" />
+  <link rel="stylesheet" href="device.css" />
+
   <script type="importmap">
     {
       "imports": {
@@ -17,16 +19,6 @@
   </script>
 </head>
 <body>
-  <!-- Shared SVG filters: turn feTurbulence noise into an alpha mask, then
-       clip the source element's own color through it -- this is what lets
-       every storm-mode layer pick up var(--glow) automatically, same as
-       every other themed element on this page.
-
-       Two filters: `storm-noise` (type="turbulence", anisotropic
-       baseFrequency) reads more like flowing veins/traces than soft
-       clouds -- closer to the reference art's circuit-like filaments.
-       `storm-noise-fine` is higher-frequency and harsher-thresholded,
-       used only for the sparse bright speckle ring near the edge. -->
   <svg width="0" height="0" style="position: absolute" aria-hidden="true">
     <defs>
       <filter id="storm-noise" x="-20%" y="-20%" width="140%" height="140%">
@@ -57,23 +49,21 @@
 
   <button id="modeToggle" title="Switch HUD style">STORM MODE</button>
 
-  <div id="wrap" data-state="idle" data-mode="reactor">
+  <div id="wrap" data-state="idle" data-mode="reactor" data-authenticated="false">
     <div id="stage">
       <div id="reactor">
         <div class="ring ring-outer"></div>
         <div class="ring ring-mid"></div>
         <div class="ring ring-inner"></div>
-        <div class="dial" id="dial"><!-- 60 tick <span>s injected by hud.js --></div>
+        <div class="dial" id="dial"></div>
         <div class="sweep"><div class="sweep-dot"></div></div>
         <div class="core"></div>
       </div>
+
       <div id="storm">
         <canvas id="stormCanvas"></canvas>
+
         <div id="stormFallback">
-          <!-- Shown only if Three.js/WebGL isn't available -- e.g. no
-               internet on first load (Three.js is CDN-hosted) or a
-               browser/GPU that can't do WebGL. Keeps storm mode fully
-               functional offline, just with the older look. -->
           <div class="storm-spokes"></div>
           <div class="storm-cloud storm-cloud-1"></div>
           <div class="storm-cloud storm-cloud-2"></div>
@@ -81,52 +71,57 @@
           <div class="storm-core storm-core-a"></div>
           <div class="storm-core storm-core-b"></div>
         </div>
+
         <div class="storm-frame">
           <span class="frame-corner tl"></span>
           <span class="frame-corner tr"></span>
           <span class="frame-corner bl"></span>
           <span class="frame-corner br"></span>
         </div>
+
         <div class="hud-scanline"></div>
+
         <div class="hud-reticle">
           <span class="reticle-ring"></span>
           <span class="reticle-line horizontal"></span>
           <span class="reticle-line vertical"></span>
         </div>
+
         <div class="hud-glyphs">
           <span class="glyph g1"></span>
           <span class="glyph g2"></span>
           <span class="glyph g3"></span>
         </div>
       </div>
+
       <div id="wordmark">J.A.R.V.I.S.</div>
     </div>
+
     <div id="statusline">
       <span id="dot"></span>
       <span id="statustext">connecting...</span>
     </div>
   </div>
 
-  <!-- Chat panel -- talks to jarvis_daemon.py's JarvisLLM over the same
-       WebSocket the state broadcasts use. If this HUD tab is connected to
-       main.py's CLI instead (no JarvisLLM attached on the server side),
-       sending a message here just gets a 'chat isn't available' notice
-       back instead of a reply. -->
   <div id="chatPanel">
     <div id="chatLog"></div>
+
     <form id="chatForm" autocomplete="off">
-      <input id="chatInput" type="text" placeholder="Talk to Jarvis..." autocomplete="off" />
+      <input
+        id="chatInput"
+        type="text"
+        placeholder="Talk to Jarvis..."
+        autocomplete="off"
+      />
       <button type="submit">Send</button>
     </form>
   </div>
 
-  <!-- Confirmation modal -- shown when a risky tool call needs approval
-       and there's no terminal to ask (jarvis_daemon.py's browser-only
-       confirmation path). Hidden entirely otherwise. -->
   <div id="confirmOverlay" class="hidden">
     <div id="confirmBox">
       <div id="confirmTitle">Confirm action</div>
       <div id="confirmBody"></div>
+
       <div id="confirmButtons">
         <button id="confirmDeny">Deny</button>
         <button id="confirmApprove">Allow</button>
@@ -134,18 +129,13 @@
     </div>
   </div>
 
-  <!-- Three.js powers storm mode's WebGL particle renderer (storm3d.js),
-       now with real bloom post-processing -- which is only available as
-       ES modules, hence type="module" here (see the importmap in <head>).
-       CDN-hosted, so it needs internet on first load -- if it fails to
-       load or WebGL isn't available, hud.js falls back to the CSS-
-       turbulence layers in #stormFallback automatically.
-
-       Module scripts defer automatically (run after parsing, in order);
-       hud.js needs `defer` too so it reliably runs *after* storm3d.js has
-       attached window.StormScene, since a plain classic script would
-       otherwise execute immediately and race ahead of the module. -->
   <script type="module" src="storm3d.js"></script>
+
+  <!-- Step 15: the HUD connects directly to JarvisBackend :8770. -->
+  <script src="backend_client.js"></script>
+
+  <!-- Step 9 identity must load before hud.js registers the device. -->
+  <script src="device.js" defer></script>
   <script src="hud.js" defer></script>
 </body>
 </html>

@@ -1,0 +1,206 @@
+/* ============================================================
+   Step 8 — phone-sized responsive HUD layout
+   Desktop HUD remains unchanged. These rules only take over below
+   tablet width and replace fixed pixel geometry with viewport-aware
+   sizing/touch targets.
+   ============================================================ */
+
+@media (max-width: 700px) {
+  html,
+  body {
+    width: 100%;
+    min-height: 100%;
+    overflow: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  #wrap {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 100dvh;
+    height: 100dvh;
+    justify-content: center;
+    gap: 16px;
+    padding: max(64px, env(safe-area-inset-top) + 28px)
+      12px
+      calc(108px + env(safe-area-inset-bottom));
+    overflow: hidden;
+  }
+
+  #stage,
+  #wrap[data-mode="storm"] #stage {
+    --hud-size: min(76vw, 320px);
+    width: var(--hud-size);
+    height: var(--hud-size);
+    flex: 0 0 var(--hud-size);
+  }
+
+  #wrap[data-mode="storm"] #stage {
+    --hud-size: min(82vw, 340px);
+  }
+
+  /* Convert the reactor's old 380px coordinate system to percentages. */
+  .dial span {
+    top: 50%;
+    left: 50%;
+    width: max(1px, calc(var(--hud-size) / 190));
+    height: clamp(7px, 2.4vw, 9px);
+    margin-left: calc(-1 * var(--hud-size) / 380);
+    transform: rotate(calc(var(--i) * 6deg))
+      translateY(calc(var(--hud-size) * -0.4684));
+  }
+
+  .sweep-dot {
+    top: 50%;
+    left: 50%;
+    width: clamp(6px, 2.2vw, 8px);
+    height: clamp(6px, 2.2vw, 8px);
+    margin: calc(-1 * clamp(3px, 1.1vw, 4px));
+    transform: translateY(calc(var(--hud-size) * -0.4684));
+  }
+
+  .core {
+    top: 50%;
+    left: 50%;
+    width: calc(var(--hud-size) * 0.3105);
+    height: calc(var(--hud-size) * 0.3105);
+    margin: calc(var(--hud-size) * -0.15525) 0 0
+      calc(var(--hud-size) * -0.15525);
+  }
+
+  #wordmark {
+    max-width: 90%;
+    font-size: clamp(15px, 5vw, 20px);
+    letter-spacing: clamp(3px, 1.2vw, 5px);
+    white-space: nowrap;
+  }
+
+  #statusline {
+    max-width: calc(100vw - 32px);
+    font-size: clamp(10px, 3vw, 12px);
+    letter-spacing: clamp(1px, 0.7vw, 2px);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #modeToggle {
+    top: max(12px, env(safe-area-inset-top));
+    right: max(12px, env(safe-area-inset-right));
+    min-height: 40px;
+    padding: 8px 11px;
+    font-size: 10px;
+    letter-spacing: 1.4px;
+  }
+
+  #chatPanel {
+    left: 12px;
+    right: 12px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    width: auto;
+    transform: none;
+    gap: 6px;
+  }
+
+  #chatLog {
+    max-height: min(24dvh, 180px);
+    padding: 0 2px;
+    gap: 5px;
+  }
+
+  .chat-line {
+    max-width: 92%;
+    font-size: 12px;
+    line-height: 1.35;
+    padding: 7px 9px;
+  }
+
+  #chatForm {
+    gap: 6px;
+  }
+
+  #chatInput {
+    min-width: 0;
+    min-height: 42px;
+    box-sizing: border-box;
+    padding: 9px 11px;
+    font-size: 16px; /* Prevents iOS Safari input zoom. */
+  }
+
+  #chatForm button {
+    flex: 0 0 auto;
+    min-width: 70px;
+    min-height: 42px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+
+  #confirmBox {
+    box-sizing: border-box;
+    width: calc(100vw - 28px);
+    max-height: calc(100dvh - 28px);
+    overflow-y: auto;
+    padding: 18px;
+  }
+
+  #confirmButtons {
+    gap: 8px;
+  }
+
+  #confirmButtons button {
+    min-height: 42px;
+    padding: 8px 14px;
+  }
+}
+
+/* Very narrow phones: protect the HUD from becoming cramped. */
+@media (max-width: 360px) {
+  #wrap {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  #stage,
+  #wrap[data-mode="storm"] #stage {
+    --hud-size: min(72vw, 270px);
+  }
+
+  #wrap[data-mode="storm"] #stage {
+    --hud-size: min(78vw, 290px);
+  }
+
+  #modeToggle {
+    right: 8px;
+    padding-left: 9px;
+    padding-right: 9px;
+  }
+
+  #chatPanel {
+    left: 8px;
+    right: 8px;
+  }
+}
+
+/* Landscape phones: give the circular HUD the vertical space it needs
+   while keeping the chat controls pinned to the bottom edge. */
+@media (max-width: 700px) and (orientation: landscape) {
+  #wrap {
+    padding-top: max(48px, env(safe-area-inset-top) + 12px);
+    padding-bottom: calc(78px + env(safe-area-inset-bottom));
+    gap: 8px;
+  }
+
+  #stage,
+  #wrap[data-mode="storm"] #stage {
+    --hud-size: min(58vh, 300px, 70vw);
+  }
+
+  #wrap[data-mode="storm"] #stage {
+    --hud-size: min(62vh, 320px, 76vw);
+  }
+
+  #chatLog {
+    max-height: min(18dvh, 110px);
+  }
+}

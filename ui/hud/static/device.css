@@ -1,0 +1,28 @@
+/* Step 10 — connected-device state hooks */
+
+#wrap[data-phone-connected="true"] {
+  --phone-online-opacity: 1;
+}
+
+#wrap[data-phone-connected="false"] {
+  --phone-online-opacity: 0.45;
+}
+
+#wrap[data-pc-connected="true"] {
+  --pc-online-opacity: 1;
+}
+
+#wrap[data-pc-connected="false"] {
+  --pc-online-opacity: 0.45;
+}
+
+
+/* Step 11 — authentication state */
+
+#wrap[data-authenticated="false"] #chatPanel {
+  opacity: 0.65;
+}
+
+#wrap[data-authenticated="true"] #chatPanel {
+  opacity: 1;
+}
