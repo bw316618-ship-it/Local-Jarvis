@@ -444,7 +444,7 @@ class JarvisLLM:
                 # knowledge base instead of respecting the active
                 # document/project boundary CREATIVE_PROMPT promises the
                 # model is in effect.
-                context = get_creative_context(user_message, k=8)
+                context = get_creative_context(user_message, k=8, query_embedding=query_embedding)
             else:
                 # project="" restricts this to documents that were never
                 # tagged with a creative project (i.e. ingest.py's general
