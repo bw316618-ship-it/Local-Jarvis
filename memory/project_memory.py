@@ -57,17 +57,24 @@ def list_projects():
 
 
 def add_document(project, path):
-    record = ensure_project(project)
+    display = " ".join((project or "").strip().split())
+    key = _key(display)
+
+    if not key:
+        raise ValueError("Creative project name cannot be empty.")
+
     projects = _load()
-    key = _key(project)
     resolved = str(Path(path).expanduser().resolve())
+
+    if key not in projects:
+        projects[key] = {"name": display, "documents": []}
 
     documents = projects[key].setdefault("documents", [])
     if resolved not in documents:
         documents.append(resolved)
 
     _save(projects)
-    return record
+    return projects[key]
 
 
 def get_document_paths(project):
