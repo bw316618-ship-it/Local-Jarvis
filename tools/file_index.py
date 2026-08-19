@@ -107,7 +107,6 @@ def _iter_candidate_files(roots):
 
 
 def count_pending_changes(directories=None) -> int:
-    """Count new/changed indexable files without indexing them."""
     roots = directories if directories is not None else get_index_roots()
     state = _load_state()
     pending = 0
@@ -126,7 +125,6 @@ def count_pending_changes(directories=None) -> int:
 
 
 def index_files(directories=None, progress=None) -> str:
-    """Index new/changed discovered files."""
     roots = directories if directories is not None else get_index_roots()
     state = _load_state()
 
@@ -174,7 +172,6 @@ def index_files(directories=None, progress=None) -> str:
 
 
 def search_files(query: str, k: int = 5) -> str:
-    """Semantically search only discovered whole-computer files."""
     collection = document_store.get_collection()
 
     if collection.count() == 0:

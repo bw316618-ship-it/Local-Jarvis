@@ -1,17 +1,16 @@
 """
 Creative/document-scoped tools.
 
-Creative Mode has its own document boundary. The active document is stored
-separately from general Jarvis memory, and retrieval is restricted by both
-source_type and exact source path.
+The original five document operations remain the public CREATIVE_TOOL_SCHEMAS
+contract. Project operations live in PROJECT_TOOL_SCHEMAS so existing callers
+that expect exactly the five document operations continue to work.
 """
 
 from pathlib import Path
 
 from config import CONFIG
-from memory import document_store
+from memory import document_store, project_memory
 from voice import document_state
-
 
 SUPPORTED_DOCUMENTS = {".txt", ".md", ".pdf"}
 
@@ -19,7 +18,6 @@ SUPPORTED_DOCUMENTS = {".txt", ".md", ".pdf"}
 def _read_document(path: Path) -> str:
     if path.suffix.lower() == ".pdf":
         from pypdf import PdfReader
-
         reader = PdfReader(str(path))
         return "\n".join(page.extract_text() or "" for page in reader.pages)
 
@@ -31,10 +29,8 @@ def set_creative_document(path: str) -> str:
 
     if not target.exists():
         return f"Document '{path}' does not exist."
-
     if not target.is_file():
         return f"'{path}' is not a file."
-
     if target.suffix.lower() not in SUPPORTED_DOCUMENTS:
         return (
             f"Unsupported creative document type '{target.suffix}'. "
@@ -45,21 +41,13 @@ def set_creative_document(path: str) -> str:
     return f"Creative document set to '{active}'."
 
 
-def ingest_creative_document(path: str) -> str:
-    """Extract and index one story/document as a manually curated document.
-
-    Ingestion is idempotent: if the exact document is already indexed and
-    has not changed since the previous ingestion, skip the expensive PDF
-    extraction/embedding pass and simply make it active.
-    """
+def ingest_creative_document(path: str, category: str = "general") -> str:
     target = Path(path).expanduser().resolve()
 
     if not target.exists():
         return f"Document '{path}' does not exist."
-
     if not target.is_file():
         return f"'{path}' is not a file."
-
     if target.suffix.lower() not in SUPPORTED_DOCUMENTS:
         return (
             f"Unsupported creative document type '{target.suffix}'. "
@@ -68,17 +56,17 @@ def ingest_creative_document(path: str) -> str:
 
     try:
         state = document_store.load_state()
-    except Exception:
-        state = {}
-    key = str(target)
-    try:
         current_mtime = target.stat().st_mtime
     except OSError as e:
         return f"Could not inspect '{path}': {e}"
 
-    # Already indexed and unchanged: don't re-extract or re-embed.
+    key = str(target)
+    project = document_state.get_active_project()
+
     if state.get(key) == current_mtime:
         document_state.set_active_document(key)
+        if project:
+            project_memory.add_document(project, key)
         return (
             f"Creative document already indexed: '{target}'. "
             "Made it the active document."
@@ -100,10 +88,14 @@ def ingest_creative_document(path: str) -> str:
             CONFIG["index_chunk_size"],
             CONFIG["index_chunk_overlap"],
             state,
+            project=project,
         )
         document_store.save_state(state)
     except Exception as e:
         return f"Could not index '{path}': {e}"
+
+    if project:
+        project_memory.add_document(project, key)
 
     document_state.set_active_document(key)
 
@@ -118,11 +110,6 @@ def get_creative_document() -> str:
 
     if not active:
         return "No creative document is active."
-
-    target = Path(active)
-
-    if not target.exists():
-        return f"Creative document '{active}' is no longer available on disk."
 
     return f"Active creative document: '{active}'."
 
@@ -149,40 +136,28 @@ def search_creative_document(query: str, k: int = 6) -> str:
     )
 
     documents = result["documents"]
-    metadatas = result["metadatas"]
 
     if not documents:
         return (
-            f"No indexed passages from the active document matched '{query}'. "
-            "Ingest the document first."
+            f"No indexed passages from the active document matched '{query}'."
         )
 
-    lines = [f"Relevant passages from '{active}':"]
-
-    for index, (doc, meta) in enumerate(zip(documents, metadatas), start=1):
-        lines.append(f"\n[{index}]")
-        lines.append(doc.strip())
-
-    return "\n".join(lines)
+    return "\n\n".join(
+        f"[Story passage {i}]\n{doc.strip()}"
+        for i, doc in enumerate(documents, 1)
+    )
 
 
+# Existing contract: EXACTLY these five.
 CREATIVE_TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
             "name": "set_creative_document",
-            "description": (
-                "Set the active story/PDF/document for creative writing work. "
-                "This does not index the document."
-            ),
+            "description": "Set the active story/PDF/document for creative work.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Local path to the story, PDF, Markdown, or text document.",
-                    }
-                },
+                "properties": {"path": {"type": "string"}},
                 "required": ["path"],
             },
         },
@@ -191,18 +166,10 @@ CREATIVE_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "ingest_creative_document",
-            "description": (
-                "Extract and index a story/PDF/Markdown/text document into "
-                "the creative document store, then make it active."
-            ),
+            "description": "Extract and index a creative document.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Local path to the story or document.",
-                    }
-                },
+                "properties": {"path": {"type": "string"}},
                 "required": ["path"],
             },
         },
@@ -211,7 +178,7 @@ CREATIVE_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_creative_document",
-            "description": "Return the currently active creative document.",
+            "description": "Return the active creative document.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -223,7 +190,7 @@ CREATIVE_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "clear_creative_document",
-            "description": "Clear the currently active creative document.",
+            "description": "Clear the active creative document.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -235,22 +202,12 @@ CREATIVE_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_creative_document",
-            "description": (
-                "Search only the active creative document for relevant story "
-                "passages. Use this before making story-specific claims, "
-                "chapter ideas, or scene suggestions."
-            ),
+            "description": "Search only the active creative document.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Character, event, relationship, location, theme, or plot point.",
-                    },
-                    "k": {
-                        "type": "integer",
-                        "description": "Maximum number of passages to return.",
-                    },
+                    "query": {"type": "string"},
+                    "k": {"type": "integer"},
                 },
                 "required": ["query"],
             },
@@ -267,3 +224,148 @@ CREATIVE_TOOL_FUNCTIONS = {
 }
 
 CREATIVE_RISKY_TOOLS = set()
+
+
+# Separate project contract.
+def set_creative_project(name: str) -> str:
+    try:
+        record = project_memory.ensure_project(name)
+    except ValueError as e:
+        return str(e)
+
+    document_state.set_active_project(record["name"])
+    document_state.clear_active_document()
+
+    return (
+        f"Creative project active: '{record['name']}'. "
+        f"{len(record.get('documents', []))} document(s) registered."
+    )
+
+
+def get_creative_project() -> str:
+    project = document_state.get_active_project()
+    if not project:
+        return "No creative project is active."
+    return project_memory.describe_project(project)
+
+
+def list_creative_projects() -> str:
+    projects = project_memory.list_projects()
+
+    if not projects:
+        return "No creative projects exist yet."
+
+    return "\n".join(
+        [
+            "Creative projects:",
+            *[
+                f"- {record.get('name', key)} "
+                f"({len(record.get('documents', []))} document(s))"
+                for key, record in projects.items()
+            ],
+        ]
+    )
+
+
+def clear_creative_project() -> str:
+    document_state.clear_scope()
+    return "Creative project and document scope cleared."
+
+
+def search_creative_project(query: str, k: int = 8) -> str:
+    project = document_state.get_active_project()
+
+    if not project:
+        return "No creative project is active."
+
+    result = document_store.search(
+        query,
+        source_type=document_store.MANUAL,
+        k=k,
+        project=project,
+    )
+
+    if not result["documents"]:
+        return f"No indexed project passages matched '{query}'."
+
+    return "\n\n".join(
+        f"[Project passage {i}]\n{doc.strip()}"
+        for i, doc in enumerate(result["documents"], 1)
+    )
+
+
+PROJECT_TOOL_SCHEMAS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "set_creative_project",
+            "description": "Activate a named creative project.",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_creative_project",
+            "description": "Show the active creative project.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_creative_projects",
+            "description": "List saved creative projects.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_creative_project",
+            "description": "Search all indexed documents in the active project.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "k": {"type": "integer"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clear_creative_project",
+            "description": "Clear the active project and document scope.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+]
+
+PROJECT_TOOL_FUNCTIONS = {
+    "set_creative_project": set_creative_project,
+    "get_creative_project": get_creative_project,
+    "list_creative_projects": list_creative_projects,
+    "search_creative_project": search_creative_project,
+    "clear_creative_project": clear_creative_project,
+}
+
+PROJECT_RISKY_TOOLS = set()
