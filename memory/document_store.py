@@ -5,8 +5,9 @@ Documents are tagged with source_type:
 - "manual": deliberately ingested knowledge-base documents.
 - "discovered": automatically indexed local files.
 
-Search can additionally be scoped to an exact source path, which allows
-creative mode to retrieve only chunks belonging to the active story/PDF.
+Search can additionally be scoped to an exact source path or named creative
+project. Project metadata is optional and does not change the existing
+path -> mtime incremental-index state contract.
 """
 
 import json
@@ -58,6 +59,7 @@ def index_one_file(
     chunk_size: int,
     chunk_overlap: int,
     state: dict,
+    project: str = None,
 ) -> int:
     """Replace all indexed chunks for one file."""
     if source_type not in {MANUAL, DISCOVERED}:
@@ -82,6 +84,7 @@ def index_one_file(
                 "source": key,
                 "filename": path.name,
                 "source_type": source_type,
+                "project": project or "",
             }
             for _ in chunks
         ]
@@ -93,6 +96,8 @@ def index_one_file(
             metadatas=metadatas,
         )
 
+    # IMPORTANT: keep this as a float. file_index.py depends on this exact
+    # state shape for incremental indexing.
     state[key] = path.stat().st_mtime
     return len(chunks)
 
@@ -103,8 +108,8 @@ def search(
     k: int = 5,
     query_embedding: list = None,
     source: str = None,
+    project: str = None,
 ) -> dict:
-    """Search documents by source type, optionally restricted to one source."""
     if source_type not in {MANUAL, DISCOVERED}:
         raise ValueError(f"Unknown document source_type: {source_type}")
 
@@ -119,15 +124,20 @@ def search(
         else get_embedder().encode(query).tolist()
     )
 
-    where = {"source_type": source_type}
+    conditions = [{"source_type": source_type}]
 
     if source is not None:
-        where = {
-            "$and": [
-                {"source_type": source_type},
-                {"source": str(Path(source).expanduser().resolve())},
-            ]
-        }
+        conditions.append(
+            {"source": str(Path(source).expanduser().resolve())}
+        )
+
+    if project is not None:
+        conditions.append({"project": project})
+
+    if len(conditions) == 1:
+        where = conditions[0]
+    else:
+        where = {"$and": conditions}
 
     results = collection.query(
         query_embeddings=[embedding],
