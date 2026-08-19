@@ -192,3 +192,53 @@ def test_model_can_exit_companion_mode_via_the_tool_mid_conversation(monkeypatch
     jarvis.chat("ok let's get back to work", on_step=lambda m: None)
 
     assert captured[0] is llm_module.TOOL_SCHEMAS
+
+
+def test_companion_user_message_is_not_framed_as_a_question(monkeypatch):
+    jarvis = make_jarvis()
+    captured = []
+
+    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
+        captured.append(messages)
+        return _stream("That makes sense.", None)
+
+    fake_client = MagicMock()
+    fake_client.chat.side_effect = fake_chat
+    jarvis.client = fake_client
+
+    monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
+    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
+
+    session_state.enter_companion_mode()
+    jarvis.chat("That was the part I missed most.", on_step=lambda m: None)
+
+    user_message = captured[0][-1]["content"]
+    assert "User:\nThat was the part I missed most." in user_message
+    assert "Question:\n" not in user_message
+
+
+def test_companion_tools_are_resolved_from_session_registry(monkeypatch):
+    jarvis = make_jarvis()
+
+    monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
+    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
+
+    session_state.enter_companion_mode()
+    result = jarvis._run_tool_call(
+        {"function": {"name": "exit_companion_mode", "arguments": {}}}
+    )
+
+    assert "Back to normal mode" in result
+    assert session_state.is_companion_mode() is False
+
+
+def test_companion_prompt_explicitly_prevents_repeated_questions():
+    jarvis = make_jarvis()
+    prompt = jarvis.companion_system_prompt
+
+    assert "Do not ask the same question again in different words." in prompt
+    assert "A response does not need to contain a question." in prompt
+    assert "If they make a statement, respond to the statement." in prompt
+    assert "Never ask a question merely to keep the conversation alive." in prompt
