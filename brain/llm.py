@@ -19,11 +19,14 @@ from tools.creative_tools import (
     CREATIVE_TOOL_SCHEMAS,
     CREATIVE_TOOL_FUNCTIONS,
     CREATIVE_RISKY_TOOLS,
+    PROJECT_TOOL_FUNCTIONS,
+    PROJECT_RISKY_TOOLS,
 )
 from tools.creative_generation import (
     CREATIVE_GENERATION_TOOL_SCHEMAS,
     CREATIVE_GENERATION_TOOL_FUNCTIONS,
     CREATIVE_GENERATION_RISKY_TOOLS,
+    get_creative_context,
 )
 
 from voice import session_state, document_state
@@ -206,14 +209,23 @@ class JarvisLLM:
             return SESSION_TOOL_FUNCTIONS, SESSION_RISKY_TOOLS
 
         if mode == CREATIVE:
+            # PROJECT_TOOL_FUNCTIONS must be merged in here to match
+            # PROJECT_TOOL_SCHEMAS being offered to the model in
+            # brain/mode_config.py's CREATIVE tool list -- otherwise the
+            # model is told set_creative_project/list_creative_projects/etc.
+            # exist and can be called, but every call resolves to
+            # "Error: unknown tool" since this registry is what
+            # _run_tool_call actually dispatches against.
             return (
                 {
                     **SESSION_TOOL_FUNCTIONS,
                     **CREATIVE_TOOL_FUNCTIONS,
+                    **PROJECT_TOOL_FUNCTIONS,
                     **CREATIVE_GENERATION_TOOL_FUNCTIONS,
                 },
                 SESSION_RISKY_TOOLS
                 | set(CREATIVE_RISKY_TOOLS)
+                | set(PROJECT_RISKY_TOOLS)
                 | set(CREATIVE_GENERATION_RISKY_TOOLS),
             )
 
@@ -423,15 +435,32 @@ class JarvisLLM:
             except Exception:
                 query_embedding = None
 
-            context_chunks = self.memory.search(
-                user_message,
-                query_embedding=query_embedding,
-            )
-            context = (
-                "\n\n".join(context_chunks)
-                if context_chunks
-                else "No relevant information was found in local memory."
-            )
+            if mode == CREATIVE:
+                # Route through the same scoped lookup the model's own
+                # get_creative_context/build_scene_context tool calls use,
+                # rather than JarvisMemory's generic unscoped search --
+                # otherwise this baseline "context" block would silently
+                # pull chunks from every project plus ingest.py's general
+                # knowledge base instead of respecting the active
+                # document/project boundary CREATIVE_PROMPT promises the
+                # model is in effect.
+                context = get_creative_context(user_message, k=8)
+            else:
+                # project="" restricts this to documents that were never
+                # tagged with a creative project (i.e. ingest.py's general
+                # knowledge base) -- without this, anything ingested into a
+                # creative project would resurface in ordinary NORMAL-mode
+                # conversations that have nothing to do with that project.
+                context_chunks = self.memory.search(
+                    user_message,
+                    query_embedding=query_embedding,
+                    project="",
+                )
+                context = (
+                    "\n\n".join(context_chunks)
+                    if context_chunks
+                    else "No relevant information was found in local memory."
+                )
 
             past_turns = recall(
                 user_message,
