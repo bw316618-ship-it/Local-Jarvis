@@ -4,7 +4,7 @@ from memory import document_store
 from voice import document_state
 
 
-def get_creative_context(query: str, k: int = 8) -> str:
+def get_creative_context(query: str, k: int = 8, query_embedding: list = None) -> str:
     active = document_state.get_active_document()
     project = document_state.get_active_project()
 
@@ -17,6 +17,7 @@ def get_creative_context(query: str, k: int = 8) -> str:
     kwargs = {
         "source_type": document_store.MANUAL,
         "k": k,
+        "query_embedding": query_embedding,
     }
 
     # A selected document wins. Otherwise a project is the retrieval boundary.
@@ -38,12 +39,12 @@ def get_creative_context(query: str, k: int = 8) -> str:
     )
 
 
-def build_chapter_ideas_context(request: str, k: int = 10) -> str:
-    return get_creative_context(request, k=k)
+def build_chapter_ideas_context(request: str, k: int = 10, query_embedding: list = None) -> str:
+    return get_creative_context(request, k=k, query_embedding=query_embedding)
 
 
-def build_scene_context(request: str, k: int = 10) -> str:
-    return get_creative_context(request, k=k)
+def build_scene_context(request: str, k: int = 10, query_embedding: list = None) -> str:
+    return get_creative_context(request, k=k, query_embedding=query_embedding)
 
 
 CREATIVE_GENERATION_TOOL_SCHEMAS = [
