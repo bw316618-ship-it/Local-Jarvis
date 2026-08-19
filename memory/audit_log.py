@@ -71,13 +71,14 @@ def _trim_if_needed() -> None:
         pass
 
 
-def log_tool_call(name: str, arguments: dict, risky: bool, approved, result: str) -> None:
+def log_tool_call(name: str, arguments: dict, risky: bool, approved, result: str, duration_ms: int = None) -> None:
     """Append one record of a tool call to the audit log.
 
     `approved` is True/False for risky calls that went through
     confirmation, or None for calls that didn't need confirmation at all
     -- so the log can tell "wasn't risky" apart from "was risky and got
-    approved".
+    approved". `duration_ms` is None for calls that never actually ran
+    (unknown tool, declined confirmation) and an int otherwise.
     """
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -86,6 +87,7 @@ def log_tool_call(name: str, arguments: dict, risky: bool, approved, result: str
         "risky": risky,
         "approved": approved,
         "result_preview": (result or "")[:MAX_RESULT_PREVIEW],
+        "duration_ms": duration_ms,
     }
 
     try:
