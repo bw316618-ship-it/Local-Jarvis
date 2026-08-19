@@ -52,6 +52,14 @@ def test_creative_followup_exposes_document_search_tool():
     ), patch(
         "brain.llm.recall_facts",
         return_value=[],
+    ), patch(
+        # CREATIVE mode now builds its baseline context via
+        # get_creative_context() -> document_store.get_collection(), which
+        # would otherwise hit the session-wide chromadb MagicMock from
+        # tests/conftest.py (unconfigured, so collection.count() blows up)
+        # instead of the jarvis.memory mock this test controls.
+        "brain.llm.get_creative_context",
+        return_value="[Story passage 1]\nplaceholder canon text",
     ):
         document_state.set_active_document(
             r"C:\Users\ironm\Downloads\story.pdf"
@@ -144,6 +152,9 @@ def test_active_document_is_passed_to_creative_context():
     ), patch(
         "brain.llm.recall_facts",
         return_value=[],
+    ), patch(
+        "brain.llm.get_creative_context",
+        return_value="[Story passage 1]\nplaceholder canon text",
     ):
         result = jarvis.chat(
             "What should happen next?",
