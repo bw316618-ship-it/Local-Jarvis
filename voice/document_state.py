@@ -37,9 +37,11 @@ def set_active_project(name: str) -> str:
     if not name:
         raise ValueError("Creative project name cannot be empty.")
 
+    global _active_project
+    global _active_document
     with _lock:
-        global _active_project
         _active_project = name
+        _active_document = None
 
     return name
 
