@@ -1,16 +1,9 @@
 """
 Screen understanding for Jarvis: screenshots + OCR.
 
-Reuses pyautogui (already a dependency for mouse/keyboard control) to
-capture the screen, and rapidocr-onnxruntime to extract text from it --
-fully local, no external OCR binary like Tesseract required.
-
-All three tools here are read-only (they only look at the screen, never
-change anything), so none are registered as risky. Worth knowing: this
-only reads TEXT on screen, not icons, images, or layout -- for actual
-visual understanding of arbitrary UI (icons, photos, layout), use
-describe_image in tools/vision.py instead, which asks a local
-vision-language model (moondream) rather than OCR-ing text.
+take_screenshot is treated as risky because it writes a PNG to a
+caller-supplied filesystem path. read_screen_text and find_text_on_screen
+remain read-only.
 """
 
 import tempfile
@@ -21,6 +14,7 @@ _ocr_engine = None
 
 def _get_ocr_engine():
     global _ocr_engine
+
     if _ocr_engine is None:
         try:
             from rapidocr_onnxruntime import RapidOCR
@@ -29,7 +23,9 @@ def _get_ocr_engine():
                 "OCR isn't available: rapidocr-onnxruntime couldn't load. "
                 "Run: pip install -r requirements.txt"
             ) from e
+
         _ocr_engine = RapidOCR()
+
     return _ocr_engine
 
 
@@ -55,14 +51,20 @@ def take_screenshot(save_path: str = "") -> str:
     except RuntimeError as e:
         return str(e)
 
-    target = Path(save_path).expanduser() if save_path else Path(tempfile.gettempdir()) / "jarvis_screenshot.png"
+    target = (
+        Path(save_path).expanduser()
+        if save_path
+        else Path(tempfile.gettempdir()) / "jarvis_screenshot.png"
+    )
+
     target.parent.mkdir(parents=True, exist_ok=True)
     image.save(str(target))
+
     return f"Screenshot saved to '{target}' ({image.width}x{image.height})."
 
 
 def read_screen_text() -> str:
-    """Capture the screen and OCR it, returning all visible text."""
+    """Capture the screen and OCR all visible text."""
     try:
         image = _take_screenshot()
         engine = _get_ocr_engine()
@@ -70,6 +72,7 @@ def read_screen_text() -> str:
         return str(e)
 
     import numpy as np
+
     result, _ = engine(np.array(image))
 
     if not result:
@@ -80,7 +83,7 @@ def read_screen_text() -> str:
 
 
 def find_text_on_screen(query: str) -> str:
-    """Find where a piece of text appears on screen, returning matches and click coordinates."""
+    """Find visible text and return matching screen coordinates."""
     try:
         image = _take_screenshot()
         engine = _get_ocr_engine()
@@ -88,6 +91,7 @@ def find_text_on_screen(query: str) -> str:
         return str(e)
 
     import numpy as np
+
     result, _ = engine(np.array(image))
 
     if not result:
@@ -95,6 +99,7 @@ def find_text_on_screen(query: str) -> str:
 
     query_lower = query.lower()
     matches = []
+
     for bbox, text, confidence in result:
         if query_lower in text.lower():
             xs = [p[0] for p in bbox]
@@ -106,8 +111,15 @@ def find_text_on_screen(query: str) -> str:
     if not matches:
         return f"No text matching '{query}' found on screen."
 
-    lines = [f'- "{text}" at ({x}, {y})' for text, x, y in matches]
-    return "Matches found (use mouse_click with these coordinates to click one):\n" + "\n".join(lines)
+    lines = [
+        f'- "{text}" at ({x}, {y})'
+        for text, x, y in matches
+    ]
+
+    return (
+        "Matches found (use mouse_click with these coordinates to click one):\n"
+        + "\n".join(lines)
+    )
 
 
 SCREEN_TOOL_SCHEMAS = [
@@ -117,15 +129,17 @@ SCREEN_TOOL_SCHEMAS = [
             "name": "take_screenshot",
             "description": (
                 "Capture a screenshot of the current screen and save it as a PNG "
-                "file. If you just need to know what's currently on screen rather "
-                "than save a file, use describe_image or read_screen_text instead."
+                "file. This writes to the filesystem and requires confirmation."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "save_path": {
                         "type": "string",
-                        "description": "Where to save the screenshot. Defaults to a temp file if omitted.",
+                        "description": (
+                            "Where to save the screenshot. Defaults to a temp "
+                            "file if omitted."
+                        ),
                     },
                 },
                 "required": [],
@@ -136,8 +150,14 @@ SCREEN_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "read_screen_text",
-            "description": "Capture the screen and read all visible text on it via OCR. Use this to know what's currently displayed.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "description": (
+                "Capture the screen and read all visible text on it via OCR."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
         },
     },
     {
@@ -145,15 +165,16 @@ SCREEN_TOOL_SCHEMAS = [
         "function": {
             "name": "find_text_on_screen",
             "description": (
-                "Find where specific text (e.g. a button label) appears on "
-                "screen right now, returning its screen coordinates. Use this "
-                "before mouse_click when you need to click something by its "
-                "visible label rather than a coordinate you already know."
+                "Find where specific text appears on screen, returning "
+                "coordinates for a later mouse action."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "The text to search for on screen, e.g. 'Save' or 'Submit'."},
+                    "query": {
+                        "type": "string",
+                        "description": "The text to search for on screen.",
+                    },
                 },
                 "required": ["query"],
             },
@@ -167,5 +188,4 @@ SCREEN_TOOL_FUNCTIONS = {
     "find_text_on_screen": find_text_on_screen,
 }
 
-# All read-only -- looking at the screen never changes anything.
-SCREEN_RISKY_TOOLS = set()
+SCREEN_RISKY_TOOLS = {"take_screenshot"}
