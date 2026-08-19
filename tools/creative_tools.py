@@ -46,7 +46,12 @@ def set_creative_document(path: str) -> str:
 
 
 def ingest_creative_document(path: str) -> str:
-    """Extract and index one story/document as a manually curated document."""
+    """Extract and index one story/document as a manually curated document.
+
+    Ingestion is idempotent: if the exact document is already indexed and
+    has not changed since the previous ingestion, skip the expensive PDF
+    extraction/embedding pass and simply make it active.
+    """
     target = Path(path).expanduser().resolve()
 
     if not target.exists():
@@ -62,14 +67,30 @@ def ingest_creative_document(path: str) -> str:
         )
 
     try:
+        state = document_store.load_state()
+    except Exception:
+        state = {}
+    key = str(target)
+    try:
+        current_mtime = target.stat().st_mtime
+    except OSError as e:
+        return f"Could not inspect '{path}': {e}"
+
+    # Already indexed and unchanged: don't re-extract or re-embed.
+    if state.get(key) == current_mtime:
+        document_state.set_active_document(key)
+        return (
+            f"Creative document already indexed: '{target}'. "
+            "Made it the active document."
+        )
+
+    try:
         text = _read_document(target)
     except Exception as e:
         return f"Could not read '{path}': {e}"
 
     if not text.strip():
         return f"Document '{path}' contains no extractable text."
-
-    state = document_store.load_state()
 
     try:
         chunk_count = document_store.index_one_file(
@@ -84,7 +105,7 @@ def ingest_creative_document(path: str) -> str:
     except Exception as e:
         return f"Could not index '{path}': {e}"
 
-    document_state.set_active_document(str(target))
+    document_state.set_active_document(key)
 
     return (
         f"Creative document ingested: '{target}'. "
