@@ -113,7 +113,8 @@ def test_creative_mode_uses_get_creative_context_not_generic_search(monkeypatch)
     monkeypatch.setattr(
         llm_module,
         "get_creative_context",
-        lambda query, k=8: captured_calls.append((query, k)) or "[Story passage 1]\ncanon text",
+        lambda query, k=8, query_embedding=None: captured_calls.append((query, k, query_embedding))
+        or "[Story passage 1]\ncanon text",
     )
 
     session_state.set_mode(CREATIVE)
@@ -121,7 +122,10 @@ def test_creative_mode_uses_get_creative_context_not_generic_search(monkeypatch)
 
     jarvis.chat("what happens to the crown", on_step=lambda m: None)
 
-    assert captured_calls == [("what happens to the crown", 8)]
+    assert len(captured_calls) == 1
+    query, k, query_embedding = captured_calls[0]
+    assert query == "what happens to the crown"
+    assert k == 8
     jarvis.memory.search.assert_not_called()
 
 

@@ -125,18 +125,27 @@ def test_add_document_creates_project_if_needed_and_dedupes(tmp_path, monkeypatc
     """Covers memory/project_memory.py's add_document -- previously untested,
     which is how the redundant double load/save went unnoticed. Verifies
     the collapsed single-load version still creates a new project on first
-    use and doesn't duplicate an already-registered document path."""
+    use and doesn't duplicate an already-registered document path.
+
+    Uses Path(...).resolve() to build the expected value rather than a
+    hardcoded POSIX literal, since add_document resolves the path itself
+    and that resolution is platform-dependent (e.g. /tmp/chapter1.txt
+    resolves to C:\\tmp\\chapter1.txt on Windows)."""
     import memory.project_memory as project_memory
+    from pathlib import Path
     monkeypatch.setattr(project_memory, "PROJECTS_PATH", tmp_path / "creative_projects.json")
 
-    record = project_memory.add_document("Fresh Project", "/tmp/chapter1.txt")
+    chapter1 = str(Path("chapter1.txt").resolve())
+    chapter2 = str(Path("chapter2.txt").resolve())
+
+    record = project_memory.add_document("Fresh Project", chapter1)
     assert record["name"] == "Fresh Project"
-    assert "/tmp/chapter1.txt" in record["documents"]
+    assert chapter1 in record["documents"]
 
-    record = project_memory.add_document("Fresh Project", "/tmp/chapter1.txt")
-    assert record["documents"].count("/tmp/chapter1.txt") == 1
+    record = project_memory.add_document("Fresh Project", chapter1)
+    assert record["documents"].count(chapter1) == 1
 
-    record = project_memory.add_document("Fresh Project", "/tmp/chapter2.txt")
+    record = project_memory.add_document("Fresh Project", chapter2)
     assert len(record["documents"]) == 2
 
 
