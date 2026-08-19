@@ -15,7 +15,6 @@ def get_creative_context(query: str, k: int = 8) -> str:
         )
 
     kwargs = {
-        "query": query,
         "source_type": document_store.MANUAL,
         "k": k,
     }
@@ -26,7 +25,7 @@ def get_creative_context(query: str, k: int = 8) -> str:
     else:
         kwargs["project"] = project
 
-    result = document_store.search(**kwargs)
+    result = document_store.search(query, **kwargs)
     documents = result["documents"]
 
     if not documents:
@@ -40,25 +39,11 @@ def get_creative_context(query: str, k: int = 8) -> str:
 
 
 def build_chapter_ideas_context(request: str, k: int = 10) -> str:
-    return get_creative_context(
-        (
-            "chapter development; current plot; characters; relationships; "
-            "conflicts; unresolved threads; recent events; consequences; "
-            f"user request: {request}"
-        ),
-        k=k,
-    )
+    return get_creative_context(request, k=k)
 
 
 def build_scene_context(request: str, k: int = 10) -> str:
-    return get_creative_context(
-        (
-            "scene and chapter continuity; characters; setting; dialogue; "
-            "events; motivations; established facts; unresolved threads; "
-            f"writing request: {request}"
-        ),
-        k=k,
-    )
+    return get_creative_context(request, k=k)
 
 
 CREATIVE_GENERATION_TOOL_SCHEMAS = [
