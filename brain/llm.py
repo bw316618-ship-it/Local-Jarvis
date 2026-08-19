@@ -9,7 +9,11 @@ from memory.conversation_memory import recall, remember_turn, recall_facts
 from memory.shared import get_embedder
 
 from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
-from tools.session_control import SESSION_TOOL_SCHEMAS, SESSION_TOOL_FUNCTIONS
+from tools.session_control import (
+    SESSION_TOOL_SCHEMAS,
+    SESSION_TOOL_FUNCTIONS,
+    SESSION_RISKY_TOOLS,
+)
 from tools.creative_tools import CREATIVE_TOOL_SCHEMAS, CREATIVE_TOOL_FUNCTIONS, CREATIVE_RISKY_TOOLS
 
 from voice import session_state, document_state
@@ -177,12 +181,12 @@ class JarvisLLM:
         if mode == NORMAL:
             return TOOL_FUNCTIONS, RISKY_TOOLS
         if mode == COMPANION:
-            return SESSION_TOOL_FUNCTIONS, set()
+            return SESSION_TOOL_FUNCTIONS, SESSION_RISKY_TOOLS
         if mode == CREATIVE:
             return {
                 **SESSION_TOOL_FUNCTIONS,
                 **CREATIVE_TOOL_FUNCTIONS,
-            }, set(CREATIVE_RISKY_TOOLS)
+            }, SESSION_RISKY_TOOLS | set(CREATIVE_RISKY_TOOLS)
         raise ValueError(f"Unsupported Jarvis mode: {mode}")
 
     def _tool_schemas_for_mode(self, mode: str):

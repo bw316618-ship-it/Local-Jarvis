@@ -1,25 +1,19 @@
-"""
-Mode configuration for Jarvis.
-
-Each mode declares its prompt, available tools, and whether task planning
-is appropriate. brain/llm.py consumes this table instead of hardcoding
-special cases for individual modes.
-"""
+"""Mode configuration for Jarvis."""
 
 from tools.tools import TOOL_SCHEMAS
 from tools.session_control import SESSION_TOOL_SCHEMAS
+from tools.creative_tools import CREATIVE_TOOL_SCHEMAS
 
 NORMAL = "normal"
 COMPANION = "companion"
 CREATIVE = "creative"
 
-
 COMPANION_PROMPT = (
     "You are J.A.R.V.I.S. in companion mode. This is an ongoing conversation, "
     "not an interview or task queue.\n\n"
     "Use the recent conversation as established context. When the user answers "
-    "something you previously asked, use that answer and move forward. Never "
-    "ask the same question again in different words.\n\n"
+    "something you previously asked, use that answer and move forward. "
+    "Do not ask the same question again in different words.\n\n"
     "A user message does not have to be a question. Respond to statements as "
     "statements. A response does not need to contain a question. Ask one only "
     "when it introduces genuinely useful new information or direction.\n\n"
@@ -31,7 +25,6 @@ COMPANION_PROMPT = (
     "experiences, feelings, memories, or beliefs. Do not turn ordinary "
     "conversation into therapy."
 )
-
 
 CREATIVE_PROMPT = (
     "You are J.A.R.V.I.S. in creative writing mode. Work as a rigorous "
@@ -50,25 +43,11 @@ CREATIVE_PROMPT = (
     "question-answer pattern."
 )
 
-
 MODE_CONFIGS = {
-    NORMAL: {
-        "prompt": None,
-        "tools": TOOL_SCHEMAS,
-        "planning": True,
-    },
-    COMPANION: {
-        "prompt": COMPANION_PROMPT,
-        "tools": SESSION_TOOL_SCHEMAS,
-        "planning": False,
-    },
-    CREATIVE: {
-        "prompt": CREATIVE_PROMPT,
-        "tools": SESSION_TOOL_SCHEMAS,
-        "planning": False,
-    },
+    NORMAL: {"prompt": None, "tools": TOOL_SCHEMAS, "planning": True},
+    COMPANION: {"prompt": COMPANION_PROMPT, "tools": SESSION_TOOL_SCHEMAS, "planning": False},
+    CREATIVE: {"prompt": CREATIVE_PROMPT, "tools": SESSION_TOOL_SCHEMAS + CREATIVE_TOOL_SCHEMAS, "planning": False},
 }
-
 
 def get_mode_config(mode: str) -> dict:
     try:
