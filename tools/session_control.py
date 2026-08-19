@@ -35,7 +35,7 @@ def enter_creative_mode() -> str:
 
 def exit_creative_mode() -> str:
     session_state.exit_creative_mode()
-    return "Back to normal task mode."
+    return "Back to normal mode."
 
 
 SESSION_TOOL_SCHEMAS = [

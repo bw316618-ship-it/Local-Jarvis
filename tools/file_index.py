@@ -85,33 +85,24 @@ def _iter_candidate_files(roots):
             continue
 
         for dirpath, dirnames, filenames in os.walk(root_path):
-            dirnames[:] = [
-                name for name in dirnames
-                if name not in SKIP_DIR_NAMES
-            ]
-
+            dirnames[:] = [name for name in dirnames if name not in SKIP_DIR_NAMES]
             current_dir = Path(dirpath)
 
             for filename in filenames:
                 path = current_dir / filename
-
                 if path.suffix.lower() not in INDEXABLE_EXTENSIONS:
                     continue
-
                 try:
                     resolved = path.resolve()
                 except OSError:
                     continue
-
                 if resolved in excluded or any(ex in resolved.parents for ex in excluded):
                     continue
-
                 try:
                     if path.stat().st_size > MAX_FILE_MB * 1024 * 1024:
                         continue
                 except OSError:
                     continue
-
                 yield path
 
 

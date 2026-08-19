@@ -20,13 +20,10 @@ def _safe_path(path: str) -> Path:
 
     if candidate.is_absolute():
         parts = list(candidate.parts)
-
         if candidate.drive:
             parts = parts[1:]
-
-        if parts and parts[0] in (candidate.anchor, "/", "\\"):
+        if parts and parts[0] == candidate.anchor:
             parts = parts[1:]
-
         candidate = Path(*parts)
 
     target = (WORKSPACE_DIR / candidate).resolve()
@@ -35,7 +32,6 @@ def _safe_path(path: str) -> Path:
         raise ValueError(
             f"'{path}' resolves outside the Jarvis workspace ({WORKSPACE_DIR})."
         )
-
     return target
 
 
