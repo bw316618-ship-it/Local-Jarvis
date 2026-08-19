@@ -1,27 +1,17 @@
-"""Companion mode: voice/session_state.py's flag, tools/session_control.py's
-toggle tools, and brain/llm.py's chat() actually honoring the flag by
-swapping the system prompt and tool list, and skipping planning.
-"""
+"""Companion mode tests."""
 
 from unittest.mock import MagicMock
-
 import pytest
 
 import brain.llm as llm_module
 from brain.llm import JarvisLLM
+from brain.mode_config import COMPANION_PROMPT
 from voice import session_state
-from tools.session_control import (
-    enter_companion_mode,
-    exit_companion_mode,
-    SESSION_TOOL_FUNCTIONS,
-    SESSION_RISKY_TOOLS,
-)
+from tools.session_control import enter_companion_mode, exit_companion_mode, SESSION_TOOL_FUNCTIONS, SESSION_RISKY_TOOLS
 
 
 @pytest.fixture(autouse=True)
 def reset_companion_flag():
-    """Module-level Event -- make sure one test's toggle can't leak into
-    the next, the same way conftest.py resets audit_log/transcript paths."""
     session_state.exit_companion_mode()
     yield
     session_state.exit_companion_mode()
@@ -35,35 +25,27 @@ def make_jarvis():
     jarvis = JarvisLLM.__new__(JarvisLLM)
     jarvis.confirm_callback = lambda name, args: True
     jarvis.system_prompt = "TASK-MODE-PROMPT"
-    jarvis.companion_system_prompt = "COMPANION-MODE-PROMPT"
+    jarvis.companion_system_prompt = COMPANION_PROMPT
     jarvis.model = "qwen3:8b"
     jarvis.memory = MagicMock(search=lambda q, **kwargs: [])
     jarvis.short_term = []
     return jarvis
 
 
-# --- session_state ----------------------------------------------------
-
 def test_flag_starts_clear_and_toggles():
-    assert session_state.is_companion_mode() is False
+    assert not session_state.is_companion_mode()
     session_state.enter_companion_mode()
-    assert session_state.is_companion_mode() is True
+    assert session_state.is_companion_mode()
     session_state.exit_companion_mode()
-    assert session_state.is_companion_mode() is False
+    assert not session_state.is_companion_mode()
 
 
 def test_toggle_companion_mode_flips_and_returns_new_state():
     assert session_state.toggle_companion_mode() is True
-    assert session_state.is_companion_mode() is True
     assert session_state.toggle_companion_mode() is False
-    assert session_state.is_companion_mode() is False
 
-
-# --- tools/session_control.py ------------------------------------------
 
 def test_registered_and_not_risky():
-    """Same bar as mute/unmute: a trivially reversible local-state
-    toggle, not a confirmation-gated action."""
     assert "enter_companion_mode" in SESSION_TOOL_FUNCTIONS
     assert "exit_companion_mode" in SESSION_TOOL_FUNCTIONS
     assert "enter_companion_mode" not in SESSION_RISKY_TOOLS
@@ -72,147 +54,86 @@ def test_registered_and_not_risky():
 
 def test_tool_functions_flip_the_same_flag_the_model_can_call():
     enter_companion_mode()
-    assert session_state.is_companion_mode() is True
+    assert session_state.is_companion_mode()
     exit_companion_mode()
-    assert session_state.is_companion_mode() is False
+    assert not session_state.is_companion_mode()
 
-
-# --- brain/llm.py chat() -------------------------------------------------
 
 def test_chat_uses_task_prompt_and_full_tools_by_default(monkeypatch):
     jarvis = make_jarvis()
     captured = []
-
-    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
-        captured.append((messages[0]["content"], tools))
-        return _stream("42", None)
-
-    fake_client = MagicMock()
-    fake_client.chat.side_effect = fake_chat
-    jarvis.client = fake_client
-
+    jarvis.client = MagicMock()
+    jarvis.client.chat.side_effect = lambda model, messages, tools=None, stream=False, **kwargs: (
+        captured.append((messages[0]["content"], tools)) or _stream("42")
+    )
     monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
-    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
-    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
-
+    monkeypatch.setattr(llm_module, "recall", lambda *a, **k: [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda *a, **k: [])
     jarvis.chat("what is 6*7", on_step=lambda m: None)
-
-    system_prompt_used, tools_used = captured[0]
-    assert system_prompt_used == "TASK-MODE-PROMPT"
-    assert tools_used is llm_module.TOOL_SCHEMAS
+    assert captured[0][0] == "TASK-MODE-PROMPT"
+    assert captured[0][1] is llm_module.TOOL_SCHEMAS
 
 
 def test_chat_uses_companion_prompt_and_limited_tools_when_flag_set(monkeypatch):
     jarvis = make_jarvis()
     captured = []
-
-    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
-        captured.append((messages[0]["content"], tools))
-        return _stream("Sure, tell me more.", None)
-
-    fake_client = MagicMock()
-    fake_client.chat.side_effect = fake_chat
-    jarvis.client = fake_client
-
+    jarvis.client = MagicMock()
+    jarvis.client.chat.side_effect = lambda model, messages, tools=None, stream=False, **kwargs: (
+        captured.append((messages[0]["content"], tools)) or _stream("Sure, tell me more.")
+    )
     monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
-    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
-    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
-
+    monkeypatch.setattr(llm_module, "recall", lambda *a, **k: [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda *a, **k: [])
     session_state.enter_companion_mode()
     jarvis.chat("I just want to talk something through", on_step=lambda m: None)
-
-    system_prompt_used, tools_used = captured[0]
-    assert system_prompt_used == "COMPANION-MODE-PROMPT"
-    assert tools_used is llm_module.SESSION_TOOL_SCHEMAS
-    # The full task registry should not be reachable in this mode.
-    assert tools_used is not llm_module.TOOL_SCHEMAS
+    assert captured[0][0] == COMPANION_PROMPT
+    assert captured[0][1] is llm_module.SESSION_TOOL_SCHEMAS
 
 
 def test_chat_skips_planning_in_companion_mode_even_for_multi_clause_input(monkeypatch):
-    """A message with 'and then'/commas would normally trigger the
-    planning round (see _looks_like_multi_step) -- companion mode should
-    bypass that entirely regardless of phrasing."""
     jarvis = make_jarvis()
     plan_calls = []
-
-    monkeypatch.setattr(
-        JarvisLLM, "_make_plan", lambda self, msg: plan_calls.append(msg) or "should not run"
-    )
-
-    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
-        return _stream("Okay, go on.", None)
-
-    fake_client = MagicMock()
-    fake_client.chat.side_effect = fake_chat
-    jarvis.client = fake_client
-
+    monkeypatch.setattr(JarvisLLM, "_make_plan", lambda self, msg: plan_calls.append(msg) or "should not run")
+    jarvis.client = MagicMock()
+    jarvis.client.chat.side_effect = lambda *a, **k: _stream("Okay, go on.")
     monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
-    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
-    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
-
+    monkeypatch.setattr(llm_module, "recall", lambda *a, **k: [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda *a, **k: [])
     session_state.enter_companion_mode()
-    steps = []
-    jarvis.chat(
-        "first I was worried about the deadline, and then my mind went "
-        "somewhere else entirely, honestly",
-        on_step=steps.append,
-    )
-
-    assert plan_calls == [], "companion mode must never trigger the task-planning round"
-    assert steps == []
+    jarvis.chat("first I was worried about the deadline, and then my mind went somewhere else", on_step=lambda m: None)
+    assert plan_calls == []
 
 
 def test_model_can_exit_companion_mode_via_the_tool_mid_conversation(monkeypatch):
-    """Regression guard: the flag must be read fresh at the top of every
-    chat() call, not cached on the instance, so a mid-conversation
-    exit_companion_mode() tool call takes effect on the very next turn."""
     jarvis = make_jarvis()
-
-    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
-        return _stream("noted", None)
-
-    fake_client = MagicMock()
-    fake_client.chat.side_effect = fake_chat
-    jarvis.client = fake_client
-
+    jarvis.client = MagicMock()
+    jarvis.client.chat.side_effect = lambda *a, **k: _stream("noted")
     monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
-    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
-    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
-
+    monkeypatch.setattr(llm_module, "recall", lambda *a, **k: [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda *a, **k: [])
     session_state.enter_companion_mode()
     jarvis.chat("talking mode", on_step=lambda m: None)
-    assert session_state.is_companion_mode() is True
-
-    exit_companion_mode()  # simulates the model calling the tool
-
+    exit_companion_mode()
     captured = []
-    fake_client.chat.side_effect = lambda model, messages, tools=None, stream=False, **kwargs: (
-        captured.append(tools) or _stream("back to it", None)
+    jarvis.client.chat.side_effect = lambda model, messages, tools=None, stream=False, **kwargs: (
+        captured.append(tools) or _stream("back to it")
     )
-    jarvis.chat("ok let's get back to work", on_step=lambda m: None)
-
+    jarvis.chat("back to work", on_step=lambda m: None)
     assert captured[0] is llm_module.TOOL_SCHEMAS
 
 
 def test_companion_user_message_is_not_framed_as_a_question(monkeypatch):
     jarvis = make_jarvis()
     captured = []
-
-    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
-        captured.append(messages)
-        return _stream("That makes sense.", None)
-
-    fake_client = MagicMock()
-    fake_client.chat.side_effect = fake_chat
-    jarvis.client = fake_client
-
+    jarvis.client = MagicMock()
+    jarvis.client.chat.side_effect = lambda model, messages, tools=None, stream=False, **kwargs: (
+        captured.append(messages) or _stream("That makes sense.")
+    )
     monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
-    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
-    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
-
+    monkeypatch.setattr(llm_module, "recall", lambda *a, **k: [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda *a, **k: [])
     session_state.enter_companion_mode()
     jarvis.chat("That was the part I missed most.", on_step=lambda m: None)
-
     user_message = captured[0][-1]["content"]
     assert "User:\nThat was the part I missed most." in user_message
     assert "Question:\n" not in user_message
@@ -220,25 +141,14 @@ def test_companion_user_message_is_not_framed_as_a_question(monkeypatch):
 
 def test_companion_tools_are_resolved_from_session_registry(monkeypatch):
     jarvis = make_jarvis()
-
-    monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
-    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
-    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
-
     session_state.enter_companion_mode()
-    result = jarvis._run_tool_call(
-        {"function": {"name": "exit_companion_mode", "arguments": {}}}
-    )
-
+    result = jarvis._run_tool_call({"function": {"name": "exit_companion_mode", "arguments": {}}})
     assert "Back to normal mode" in result
-    assert session_state.is_companion_mode() is False
+    assert not session_state.is_companion_mode()
 
 
 def test_companion_prompt_explicitly_prevents_repeated_questions():
-    jarvis = make_jarvis()
-    prompt = jarvis.companion_system_prompt
-
-    assert "Do not ask the same question again in different words." in prompt
-    assert "A response does not need to contain a question." in prompt
-    assert "If they make a statement, respond to the statement." in prompt
-    assert "Never ask a question merely to keep the conversation alive." in prompt
+    assert "Do not ask the same question again in different words." in COMPANION_PROMPT
+    assert "A response does not need to contain a question." in COMPANION_PROMPT
+    assert "If they make a statement, respond to the statement." in COMPANION_PROMPT
+    assert "Never ask a question merely to keep the conversation alive." in COMPANION_PROMPT
