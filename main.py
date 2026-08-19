@@ -33,6 +33,8 @@ COMMANDS = [
     ("/talk", "Toggle companion mode"),
     ("/creative [path]", "Enter creative mode, optionally selecting a story/PDF"),
     ("/creative-off", "Leave creative mode"),
+    ("/project <name>", "Activate a named creative project"),
+    ("/project", "Show the active creative project"),
     ("/save [path]", "Save this session's transcript"),
     ("/log [n]", "Show recent tool calls"),
     ("/forget", "Permanently clear long-term conversation memory"),
@@ -371,6 +373,9 @@ def main():
 
         if lowered == "/creative-off":
             session_state.set_mode(session_state.NORMAL)
+            from voice import document_state
+
+            document_state.clear_scope()
             console.print(
                 "[dim]Creative mode off -- back to normal task mode.[/dim]\n"
             )
@@ -392,6 +397,23 @@ def main():
                     "Jarvis can set one through the creative tools.[/dim]\n"
                 )
 
+            continue
+
+        if lowered == "/project":
+            from tools.creative_tools import get_creative_project
+
+            session_state.set_mode(session_state.CREATIVE)
+            console.print(f"[dim]{get_creative_project()}[/dim]\n")
+            continue
+
+        if lowered.startswith("/project "):
+            from tools.creative_tools import set_creative_project
+
+            project_name = stripped.split(maxsplit=1)[1]
+            session_state.set_mode(session_state.CREATIVE)
+            console.print(
+                f"[dim]{set_creative_project(project_name)}[/dim]\n"
+            )
             continue
 
         if lowered == "/index":
