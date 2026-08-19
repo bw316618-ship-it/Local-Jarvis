@@ -1,3 +1,6 @@
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+
 from ollama import Client
 from memory.retriever import JarvisMemory
 from memory.audit_log import log_tool_call
@@ -8,6 +11,16 @@ from config import CONFIG
 
 MAX_TOOL_ROUNDS = CONFIG["max_tool_rounds"]
 SHORT_TERM_TURNS = CONFIG["short_term_turns"]
+TOOL_CALL_TIMEOUT_SECONDS = CONFIG["tool_call_timeout_seconds"]
+
+# One shared worker pool for enforcing per-tool timeouts. A thread-based
+# timeout (rather than signal.alarm) works no matter which thread calls
+# _run_tool_call -- the daemon/HUD path runs it off the main thread, where
+# signal-based timeouts aren't available at all. A timed-out call's thread
+# is not forcibly killed (Python has no safe way to do that); it's left to
+# finish in the background and its result is simply discarded, so a tool
+# that ignores the timeout can't corrupt a later call's result.
+_TOOL_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="tool-call")
 
 # Passed as `options` on every Ollama chat call -- previously defined in
 # config.py/jarvis_config.json but never actually wired through, so
@@ -223,12 +236,21 @@ class JarvisLLM:
                 log_tool_call(name, arguments, risky=True, approved=False, result=result)
                 return result
 
+        start = time.monotonic()
         try:
-            result = str(func(**arguments))
+            future = _TOOL_EXECUTOR.submit(func, **arguments)
+            try:
+                result = str(future.result(timeout=TOOL_CALL_TIMEOUT_SECONDS))
+            except FutureTimeoutError:
+                result = (
+                    f"Error: tool '{name}' timed out after "
+                    f"{TOOL_CALL_TIMEOUT_SECONDS}s"
+                )
         except Exception as e:
             result = f"Error running tool '{name}': {e}"
+        duration_ms = int((time.monotonic() - start) * 1000)
 
-        log_tool_call(name, arguments, risky=is_risky, approved=approved, result=result)
+        log_tool_call(name, arguments, risky=is_risky, approved=approved, result=result, duration_ms=duration_ms)
         return result
 
     def _make_plan(self, user_message: str) -> str:
