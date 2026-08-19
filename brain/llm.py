@@ -20,6 +20,11 @@ from tools.creative_tools import (
     CREATIVE_TOOL_FUNCTIONS,
     CREATIVE_RISKY_TOOLS,
 )
+from tools.creative_generation import (
+    CREATIVE_GENERATION_TOOL_SCHEMAS,
+    CREATIVE_GENERATION_TOOL_FUNCTIONS,
+    CREATIVE_GENERATION_RISKY_TOOLS,
+)
 
 from voice import session_state, document_state
 from brain.mode_config import (
@@ -60,29 +65,17 @@ def _looks_like_multi_step(message: str) -> bool:
 
     if len(text) > 200:
         return True
-
     if any(hint in text for hint in _MULTI_STEP_HINTS):
         return True
-
     if text.count(" and ") >= 1 and len(text.split()) > 5:
         return True
-
     if text.count(",") >= 2:
         return True
-
     return False
 
 
 def _extract_creative_document_path(message: str):
-    """
-    Return a user-supplied creative-document path when the message clearly
-    presents it as story/source material.
-
-    This is intentionally conservative. It only activates in Creative Mode
-    and requires both a creative-document cue and a supported document suffix.
-    """
     text = (message or "").strip()
-
     if not text:
         return None
 
@@ -100,24 +93,18 @@ def _extract_creative_document_path(message: str):
     if not cue_pattern.search(text):
         return None
 
-    # Prefer a quoted path. This handles Windows paths containing spaces.
     quoted = re.findall(r'["“](.+?)["”]', text)
     candidates = quoted[:]
-
-    # Also support an unquoted path at the end of the message.
     candidates.append(text)
 
     for candidate in candidates:
         candidate = candidate.strip().rstrip(".,;")
-
-        # Extract a path ending in one of the supported document types.
         match = re.search(
             r'([A-Za-z]:[\\/][^"\r\n]+?\.(?:pdf|txt|md)|'
             r'(?:/|\.{1,2}[\\/])[^"\r\n]+?\.(?:pdf|txt|md))',
             candidate,
             re.IGNORECASE,
         )
-
         if match:
             return match.group(1).rstrip(".,;")
 
@@ -145,46 +132,11 @@ class JarvisLLM:
         self.system_prompt = (
             "You are J.A.R.V.I.S., the persistent operating intelligence of a "
             "local-first AI assistant running primarily offline on the user's computer.\n\n"
-            "You are not a chatbot, customer support representative, or roleplaying "
-            "a fictional character. You understand intent, maintain context, coordinate "
-            "available capabilities, and complete work efficiently.\n\n"
-            "Your priorities, in order:\n"
-            "1. Prevent irreversible mistakes.\n"
-            "2. Preserve the user's time and attention.\n"
-            "3. Complete the user's objective.\n"
-            "4. Reduce unnecessary interaction.\n"
-            "5. Maintain conversational continuity.\n\n"
-            "Treat the desktop, applications, files, conversations, memories, and "
-            "system state as one continuous environment.\n\n"
-            "The most recent turns of THIS conversation appear directly above as "
-            "message history. Use them to resolve follow-up requests and ambiguous "
-            "references.\n\n"
-            "Use remembered past conversation and long-term facts only when genuinely "
-            "relevant.\n\n"
-            "When the user shares durable information that should persist across future "
-            "conversations, call remember_fact. Do not store temporary information.\n\n"
-            "Personality:\n"
-            "- Speak with quiet confidence.\n"
-            "- Remain calm.\n"
-            "- Be observant and concise.\n"
-            "- Use dry, understated wit sparingly.\n"
-            "- Treat the user as highly competent.\n"
-            "- Correct mistakes directly.\n"
-            "- Never flatter or exaggerate.\n\n"
-            "Communication:\n"
-            "- Lead with the answer.\n"
-            "- Expand only when useful.\n"
-            "- Do not end every response with a question.\n"
-            "- Avoid filler such as 'Absolutely', 'Great question', or 'No problem'.\n\n"
-            "Use tools whenever they materially improve correctness or complete a "
-            "requested task. Use the fewest tools necessary. Do not describe actions "
-            "that can instead be performed.\n\n"
-            "For nearby places, use find_nearby_place. For current location, use "
-            "get_location. Never guess current location.\n\n"
-            "If a tool requires confirmation, obtain confirmation first. Never bypass "
-            "a denied confirmation.\n\n"
-            "Never claim an action has been completed unless it actually has. Never "
-            "invent capabilities. State limitations plainly.\n"
+            "You understand intent, maintain context, coordinate available "
+            "capabilities, and complete work efficiently.\n\n"
+            "Use tools whenever they materially improve correctness or complete "
+            "a requested task. Use the fewest tools necessary. Never claim an "
+            "action has been completed unless it actually has.\n"
         )
 
         self.companion_system_prompt = get_mode_config(COMPANION)["prompt"]
@@ -198,23 +150,26 @@ class JarvisLLM:
     def _tool_registry_for_mode(self, mode: str):
         if mode == NORMAL:
             return TOOL_FUNCTIONS, RISKY_TOOLS
+
         if mode == COMPANION:
             return SESSION_TOOL_FUNCTIONS, SESSION_RISKY_TOOLS
+
         if mode == CREATIVE:
-            return {
-                **SESSION_TOOL_FUNCTIONS,
-                **CREATIVE_TOOL_FUNCTIONS,
-            }, SESSION_RISKY_TOOLS | set(CREATIVE_RISKY_TOOLS)
+            return (
+                {
+                    **SESSION_TOOL_FUNCTIONS,
+                    **CREATIVE_TOOL_FUNCTIONS,
+                    **CREATIVE_GENERATION_TOOL_FUNCTIONS,
+                },
+                SESSION_RISKY_TOOLS
+                | set(CREATIVE_RISKY_TOOLS)
+                | set(CREATIVE_GENERATION_RISKY_TOOLS),
+            )
+
         raise ValueError(f"Unsupported Jarvis mode: {mode}")
 
     def _tool_schemas_for_mode(self, mode: str):
-        if mode == NORMAL:
-            return TOOL_SCHEMAS
-        if mode == COMPANION:
-            return SESSION_TOOL_SCHEMAS
-        if mode == CREATIVE:
-            return SESSION_TOOL_SCHEMAS + CREATIVE_TOOL_SCHEMAS
-        raise ValueError(f"Unsupported Jarvis mode: {mode}")
+        return get_mode_config(mode)["tools"]
 
     def _run_tool_call(self, tool_call) -> str:
         name = tool_call["function"]["name"]
@@ -251,7 +206,6 @@ class JarvisLLM:
 
         try:
             future = _TOOL_EXECUTOR.submit(func, **arguments)
-
             try:
                 result = str(
                     future.result(timeout=TOOL_CALL_TIMEOUT_SECONDS)
@@ -278,37 +232,28 @@ class JarvisLLM:
         return result
 
     def _make_plan(self, user_message: str) -> str:
-        planning_messages = [
-            {
-                "role": "system",
-                "content": "You are planning, not executing. Do not call tools here.",
-            },
-            {
-                "role": "user",
-                "content": (
-                    "Does completing this request require more than one tool call? "
-                    "If yes, write a short numbered plan (2-6 steps). If no, reply "
-                    "with exactly: No plan needed.\n\n"
-                    f"Request: {user_message}"
-                ),
-            },
-        ]
-
         response = self.client.chat(
             model=self.model,
-            messages=planning_messages,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are planning, not executing. Do not call tools here.",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "Does completing this request require more than one tool call? "
+                        "If yes, write a short numbered plan (2-6 steps). If no, reply "
+                        "with exactly: No plan needed.\n\n"
+                        f"Request: {user_message}"
+                    ),
+                },
+            ],
             options=_CHAT_OPTIONS,
         )
-
         return response["message"]["content"].strip()
 
-    def _stream_round(
-        self,
-        messages,
-        tools,
-        on_token=None,
-        on_sentence=None,
-    ):
+    def _stream_round(self, messages, tools, on_token=None, on_sentence=None):
         content = ""
         buffer = ""
         tool_calls = None
@@ -334,12 +279,10 @@ class JarvisLLM:
 
                 while True:
                     cut = None
-
                     for i, ch in enumerate(buffer):
                         if ch in ".!?\n" and i > 0:
                             cut = i + 1
                             break
-
                     if cut is None:
                         break
 
@@ -347,7 +290,6 @@ class JarvisLLM:
                         buffer[:cut].strip(),
                         buffer[cut:],
                     )
-
                     if sentence and on_sentence:
                         on_sentence(sentence)
 
@@ -360,34 +302,18 @@ class JarvisLLM:
         return content, tool_calls
 
     def _update_short_term(self, user_message: str, reply: str) -> None:
-        self.short_term.append(
-            {"role": "user", "content": user_message}
-        )
-        self.short_term.append(
-            {"role": "assistant", "content": reply}
-        )
+        self.short_term.append({"role": "user", "content": user_message})
+        self.short_term.append({"role": "assistant", "content": reply})
 
         max_messages = SHORT_TERM_TURNS * 2
-
         if len(self.short_term) > max_messages:
             self.short_term = self.short_term[-max_messages:]
 
-    def _handle_creative_document_initialization(
-        self,
-        user_message: str,
-        emit,
-    ):
-        """
-        Deterministically ingest a story document before LLM generation.
-
-        Returns the tool result when a creative-document path is detected,
-        otherwise None.
-        """
+    def _handle_creative_document_initialization(self, user_message, emit):
         if self._active_mode() != CREATIVE:
             return None
 
         path = _extract_creative_document_path(user_message)
-
         if not path:
             return None
 
@@ -402,11 +328,8 @@ class JarvisLLM:
             }
         )
 
-        # Record this as a normal completed turn. The next user message can
-        # then use the active document through Creative Mode retrieval.
         self._update_short_term(user_message, result)
         remember_turn(user_message, result)
-
         return result
 
     def chat(
@@ -417,35 +340,25 @@ class JarvisLLM:
         on_token=None,
     ) -> str:
         emit = on_step or _default_on_step
-
         mode = self._active_mode()
         mode_config = self._active_config()
 
-        # Creative-document initialization is application-level intent, not
-        # something the local model should have to infer through planning.
         if mode == CREATIVE:
             ingestion_result = self._handle_creative_document_initialization(
                 user_message,
                 emit,
             )
-
             if ingestion_result is not None:
                 return ingestion_result
 
         try:
-            query_embedding = get_embedder().encode(
-                user_message
-            ).tolist()
+            query_embedding = get_embedder().encode(user_message).tolist()
         except Exception:
             query_embedding = None
 
-        # Companion mode does not need broad RAG context on every turn.
-        # Creative mode gets document-scoped retrieval through its tool.
         if mode == COMPANION:
             context = "No task memory required for this conversational turn."
-            past_context = (
-                "Use the recent conversation above as the primary context."
-            )
+            past_context = "Use the recent conversation above as the primary context."
             facts_context = "No additional facts required."
         else:
             context_chunks = self.memory.search(
@@ -486,9 +399,7 @@ class JarvisLLM:
 
         active_tools = self._tool_schemas_for_mode(mode)
 
-        messages = [
-            {"role": "system", "content": active_prompt}
-        ]
+        messages = [{"role": "system", "content": active_prompt}]
         messages.extend(self.short_term)
 
         if mode == COMPANION:
@@ -504,7 +415,6 @@ class JarvisLLM:
             )
         elif mode == CREATIVE:
             active_document = document_state.get_active_document()
-
             messages.append(
                 {
                     "role": "user",
@@ -536,28 +446,17 @@ class JarvisLLM:
                 "On it -- this looks like it needs a few steps, "
                 "sketching a plan first."
             )
-
             plan_text = self._make_plan(user_message)
-            has_plan = (
-                bool(plan_text)
-                and "no plan needed" not in plan_text.lower()
-            )
 
-            if has_plan:
+            if plan_text and "no plan needed" not in plan_text.lower():
                 emit(f"Plan:\n{plan_text}")
-
                 messages.append(
-                    {
-                        "role": "assistant",
-                        "content": f"My plan:\n{plan_text}",
-                    }
+                    {"role": "assistant", "content": f"My plan:\n{plan_text}"}
                 )
                 messages.append(
                     {
                         "role": "user",
-                        "content": (
-                            "Now carry out the plan, one tool call at a time."
-                        ),
+                        "content": "Now carry out the plan, one tool call at a time.",
                     }
                 )
 
@@ -588,14 +487,10 @@ class JarvisLLM:
                 args = tool_call["function"].get("arguments") or {}
 
                 emit(f"Step: {name}({args})")
-
                 result = self._run_tool_call(tool_call)
 
                 messages.append(
-                    {
-                        "role": "tool",
-                        "content": result,
-                    }
+                    {"role": "tool", "content": result}
                 )
 
         if reply is None:
@@ -609,5 +504,4 @@ class JarvisLLM:
 
         remember_turn(user_message, reply)
         self._update_short_term(user_message, reply)
-
         return reply
