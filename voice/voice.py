@@ -30,7 +30,10 @@ class JarvisVoice:
 
     def _ensure_speech_worker(self):
         if self._speech_thread is None or not self._speech_thread.is_alive():
-            self._speech_thread = threading.Thread(target=self._speech_worker, daemon=True)
+            self._speech_thread = threading.Thread(
+                target=self._speech_worker,
+                daemon=True,
+            )
             self._speech_thread.start()
 
     def _speech_worker(self):
@@ -72,7 +75,9 @@ class JarvisVoice:
                 ) from e
             print("Loading speech recognition model (first use only)...")
             self._stt_model = WhisperModel(
-                self._whisper_model_name, device="cpu", compute_type="int8"
+                self._whisper_model_name,
+                device="cpu",
+                compute_type="int8",
             )
         return self._stt_model
 
@@ -97,7 +102,8 @@ class JarvisVoice:
                 self._tts_voice = PiperVoice.load(str(model_path))
             except Exception as e:
                 raise RuntimeError(
-                    f"Text-to-speech isn't available: could not load Piper voice model '{model_path}': {e}"
+                    f"Text-to-speech isn't available: could not load Piper voice model "
+                    f"'{model_path}': {e}"
                 ) from e
         return self._tts_voice
 
@@ -113,6 +119,98 @@ class JarvisVoice:
         segments, _ = model.transcribe(recording)
         return " ".join(segment.text for segment in segments).strip()
 
+    def _listen_until_silence(self) -> str:
+        """Record speech until a natural pause, with hard safety limits."""
+        try:
+            import numpy as np
+            import sounddevice as sd
+        except (ImportError, OSError) as e:
+            raise RuntimeError(
+                "Speech input isn't available: sounddevice/numpy could not be loaded."
+            ) from e
+
+        vad = self._get_vad()
+
+        frame_seconds = VAD_FRAME_SIZE / SAMPLE_RATE
+        max_wait_frames = max(
+            1,
+            int(float(CONFIG["voice_max_wait_seconds"]) / frame_seconds),
+        )
+        silence_frames = max(
+            1,
+            int(float(CONFIG["voice_silence_seconds"]) / frame_seconds),
+        )
+        max_recording_frames = max(
+            1,
+            int(float(CONFIG["voice_max_recording_seconds"]) / frame_seconds),
+        )
+
+        chunks = []
+        speech_started = False
+        silent_count = 0
+
+        with sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            dtype="int16",
+            blocksize=VAD_FRAME_SIZE,
+        ) as stream:
+            for frame_index in range(max_recording_frames):
+                data, _ = stream.read(VAD_FRAME_SIZE)
+                chunk = np.asarray(data).reshape(-1)
+                score = float(vad.predict(chunk))
+
+                if score >= VAD_SPEECH_THRESHOLD:
+                    speech_started = True
+                    silent_count = 0
+                    chunks.append(chunk.copy())
+                    continue
+
+                if not speech_started:
+                    if frame_index + 1 >= max_wait_frames:
+                        return ""
+                    continue
+
+                chunks.append(chunk.copy())
+                silent_count += 1
+
+                if silent_count >= silence_frames:
+                    break
+
+        if not speech_started or not chunks:
+            return ""
+
+        recording = np.concatenate(chunks).astype("float32") / 32768.0
+        return self._transcribe(recording)
+
+    def _listen_fixed_duration(self, duration: int) -> str:
+        """Record for a fixed duration and transcribe it."""
+        try:
+            import numpy as np
+            import sounddevice as sd
+        except (ImportError, OSError) as e:
+            raise RuntimeError(
+                "Speech input isn't available: sounddevice/numpy could not be loaded."
+            ) from e
+
+        duration = max(1, int(duration))
+        frame_seconds = VAD_FRAME_SIZE / SAMPLE_RATE
+        frame_count = max(1, int(duration / frame_seconds))
+
+        chunks = []
+
+        with sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            dtype="int16",
+            blocksize=VAD_FRAME_SIZE,
+        ) as stream:
+            for _ in range(frame_count):
+                data, _ = stream.read(VAD_FRAME_SIZE)
+                chunks.append(np.asarray(data).reshape(-1).copy())
+
+        recording = np.concatenate(chunks).astype("float32") / 32768.0
+        return self._transcribe(recording)
 
     def listen(self, duration: int = None) -> str:
         if duration:
@@ -126,14 +224,17 @@ class JarvisVoice:
         voice = self._get_tts_voice()
 
         try:
-            import sounddevice as sd
             import numpy as np
+            import sounddevice as sd
         except (ImportError, OSError) as e:
             raise RuntimeError("Text-to-speech isn't available.") from e
 
         try:
             chunks = [
-                np.frombuffer(audio_chunk.audio_int16_bytes, dtype=np.int16)
+                np.frombuffer(
+                    audio_chunk.audio_int16_bytes,
+                    dtype=np.int16,
+                )
                 for audio_chunk in voice.synthesize(text)
             ]
         except Exception as e:
@@ -143,6 +244,7 @@ class JarvisVoice:
             return
 
         audio = np.concatenate(chunks)
+
         try:
             sd.play(audio, samplerate=voice.config.sample_rate)
             sd.wait()
