@@ -87,7 +87,8 @@ class ConsoleSink(OutputSink):
             self.console.print("[bold blue]Jarvis[/bold blue] [dim]\u203a[/dim] ", end="")
 
     def sentence(self, text: str, speak_replies: bool) -> None:
-        self.console.print(text, end=" ", soft_wrap=True, highlight=False)
+        def sentence(self, text: str, speak_replies: bool) -> None:
+            self.console.print(text, soft_wrap=True, highlight=False)
 
     def step(self, message: str, tool_name: str) -> None:
         from rich.panel import Panel
