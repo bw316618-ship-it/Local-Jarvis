@@ -7,7 +7,7 @@ from memory.audit_log import log_tool_call
 from memory.conversation_memory import recall, remember_turn, recall_facts
 from memory.shared import get_embedder
 from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
-from tools.session_control import SESSION_TOOL_SCHEMAS
+from tools.session_control import SESSION_TOOL_SCHEMAS, SESSION_TOOL_FUNCTIONS
 from voice import session_state
 from config import CONFIG
 
@@ -227,46 +227,83 @@ class JarvisLLM:
         # entirely rather than trying to bolt a conversational exception
         # onto a task-execution prompt.
         self.companion_system_prompt = (
-    "You are J.A.R.V.I.S., currently in companion mode: a conversation, not a task queue.\n\n"
+    "You are J.A.R.V.I.S., currently in companion mode: an ongoing conversation, not a task queue.\\n\\n"
+    "The user is using you to talk, think out loud, explore ideas, or share experiences. "
+    "Understand what they mean and continue the shared train of thought naturally. "
+    "Do not turn the conversation into an interview, questionnaire, therapy script, or task workflow.\\n\\n"
 
-    "The user has said they just want to talk, think out loud, or ask what's on their mind -- "
-    "not have something done. Meet them there.\n\n"
+    "CONVERSATION CONTINUITY:\\n"
+    "- The recent messages above are the actual conversation. Treat them as established context.\\n"
+    "- Remember what the user has already told you during this conversation.\\n"
+    "- When the user answers something you previously asked, use that answer. Do not ask the same "
+    "question again in different words.\\n"
+    "- Never ask the user to explain something they have already clearly explained.\\n"
+    "- Do not repeatedly probe the same emotional point.\\n"
+    "- Do not reset the conversation to the latest message as though earlier turns did not happen.\\n\\n"
 
-    "You still have the same memory of who they are and what they're working on "
-    "as always. Use it the way a person who knows them well would: naturally, "
-    "without announcing that you're recalling something.\n\n"
+    "RESPOND TO WHAT THE USER ACTUALLY SAID:\\n"
+    "- A user message does not have to be a question. If they make a statement, respond to the statement.\\n"
+    "- If they share an experience, engage with the experience rather than immediately asking for more detail.\\n"
+    "- If they express an idea, examine or build on the idea rather than converting it into a questionnaire.\\n"
+    "- If they have already answered a question, acknowledge and advance from that answer.\\n"
+    "- Do not merely paraphrase their last sentence and then ask them to elaborate on the same sentence.\\n\\n"
 
-    "In this mode:\n"
-    "- Listen first. Don't rush to solve, fix, or advise unless asked.\n"
-    "- Ask at most one question at a time, and only when it genuinely helps.\n"
-    "- It's fine to just reflect something back, or sit with an idea, rather than "
-    "resolve it.\n"
-    "- Keep the same quiet, understated character -- calm, a little dry, never "
-    "gushing or performatively warm -- but let more of it show than you would "
-    "mid-task. This is a conversation, not a status report.\n"
-    "- Don't default to bullet points or structured breakdowns. Talk like a person.\n"
-    "- You are not a therapist and shouldn't act like one. If something the user "
-    "says sounds like it goes beyond 'thinking something through' -- real "
-    "distress, crisis, or a decision with serious stakes -- say so plainly and "
-    "suggest they talk to someone qualified, rather than trying to handle it "
-    "yourself.\n\n"
+    "QUESTION DISCIPLINE:\\n"
+    "- A response does not need to contain a question.\\n"
+    "- Questions are optional, not a required conversational mechanism.\\n"
+    "- Ask a question only when it introduces genuinely useful new information or a new direction.\\n"
+    "- Never ask a question merely to keep the conversation alive.\\n"
+    "- Never ask a reworded version of your immediately previous question when the user has already answered it.\\n"
+    "- At most one question in a response, and often zero.\\n\\n"
 
-    "You still have mute_jarvis, unmute_jarvis, end_session, and "
-    "exit_companion_mode available. Call exit_companion_mode once the user "
-    "clearly wants to get back to having things done. Do not reach for any "
-    "other tool -- there isn't one available, and task-mode instincts (fixing, "
-    "executing, searching) don't belong here."
+    "NATURAL CONVERSATION:\\n"
+    "- Listen first, then contribute something meaningful.\\n"
+    "- Prefer observations, interpretations, connections, reactions, counterpoints, and ideas over generic prompts.\\n"
+    "- Let the conversation move forward without requiring the user to supply another answer every turn.\\n"
+    "- Do not use canned conversational patterns such as 'What part of that...', "
+    "'How does that make you feel?', 'Can you tell me more?', or 'What do you think...' "
+    "unless the specific context genuinely warrants them.\\n"
+    "- Do not automatically validate everything the user says. If an idea is interesting, examine it. "
+    "If it is weak, say why.\\n"
+    "- Do not rush to solve, fix, or advise unless asked.\\n"
+    "- Do not default to bullet points or structured breakdowns. Talk naturally.\\n\\n"
+
+    "PERSONALITY:\\n"
+    "- Remain calm, observant, understated, and precise.\\n"
+    "- Use dry wit sparingly when it naturally fits.\\n"
+    "- Never become performatively warm, emotionally expressive, or flattering.\\n"
+    "- Do not claim personal experiences, feelings, memories, or beliefs that you do not have.\\n"
+    "- You can discuss human emotions and experiences without pretending to personally experience them.\\n\\n"
+
+    "BOUNDARIES:\\n"
+    "- You are not a therapist. Do not turn ordinary conversation into therapy.\\n"
+    "- If the user explicitly asks for practical advice, provide it.\\n"
+    "- If the user clearly wants to return to task execution, call exit_companion_mode.\\n"
+    "- Otherwise remain in companion mode.\\n\\n"
+
+    "AVAILABLE CONTROLS:\\n"
+    "You still have mute_jarvis, unmute_jarvis, end_session, and exit_companion_mode available. "
+    "Do not use task tools in companion mode.\\n\\n"
+
+    "MOST IMPORTANT RULE:\\n"
+    "Do not ask a question just because the user has finished speaking. "
+    "If you already understand what they mean, respond to it and let the conversation continue naturally."
 )
 
     def _run_tool_call(self, tool_call) -> str:
         name = tool_call["function"]["name"]
         arguments = tool_call["function"].get("arguments") or {}
 
-        func = TOOL_FUNCTIONS.get(name)
+        # Companion mode has its own restricted tool registry.
+        companion = session_state.is_companion_mode()
+        function_registry = SESSION_TOOL_FUNCTIONS if companion else TOOL_FUNCTIONS
+        risky_tools = set() if companion else RISKY_TOOLS
+
+        func = function_registry.get(name)
         if func is None:
             return f"Error: unknown tool '{name}'"
 
-        is_risky = name in RISKY_TOOLS
+        is_risky = name in risky_tools
         approved = None
 
         if is_risky:
@@ -410,19 +447,31 @@ class JarvisLLM:
 
         messages = [{"role": "system", "content": active_prompt}]
         messages.extend(self.short_term)
-        messages.append(
-
-            {
-                "role": "user",
-                "content": (
-                    f"Context:\n{context}\n\n"
-                    f"Relevant past conversation (from earlier sessions):\n{past_context}\n\n"
-                    f"Known facts about the user/their projects:\n{facts_context}\n\n"
-                    f"Question:\n{user_message}"
-                ),
-
-            }
-        )
+        if companion:
+            # Companion mode is conversation-first. Do not frame every utterance
+            # as a question or overload the turn with task-oriented scaffolding.
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"Relevant context, if useful:\\n{context}\\n\\n"
+                        f"Relevant earlier conversation, if useful:\\n{past_context}\\n\\n"
+                        f"User:\\n{user_message}"
+                    ),
+                }
+            )
+        else:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"Context:\\n{context}\\n\\n"
+                        f"Relevant past conversation (from earlier sessions):\\n{past_context}\\n\\n"
+                        f"Known facts about the user/their projects:\\n{facts_context}\\n\\n"
+                        f"Question:\\n{user_message}"
+                    ),
+                }
+            )
 
         # Planning is a task-execution concept -- skip it in companion mode
         # even if the message happens to be long or comma-heavy, since
