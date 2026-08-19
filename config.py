@@ -30,6 +30,12 @@ DEFAULTS = {
     "wake_word_threshold": 0.5,
     # tools/system.py, tools/git_tools.py
     "command_timeout_seconds": 30,
+    # brain/llm.py -- wall-clock cap on any single tool call (network
+    # requests, vision/OCR, etc.), distinct from command_timeout_seconds
+    # above which only bounds subprocess-based tools. A tool that hangs
+    # past this is treated as failed rather than blocking the whole
+    # conversation turn indefinitely.
+    "tool_call_timeout_seconds": 45,
     # tools/file_index.py -- index_roots: null means use the built-in
     # Documents/Desktop/Downloads default; set a list of paths to override.
     "index_roots": None,
