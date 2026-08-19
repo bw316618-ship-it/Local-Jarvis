@@ -356,6 +356,8 @@ def main():
             continue
 
         if lowered == "/talk":
+            from voice import document_state
+
             if session_state.current_mode() == session_state.COMPANION:
                 session_state.set_mode(session_state.NORMAL)
                 console.print(
@@ -363,11 +365,24 @@ def main():
                     "full tool access.[/dim]\n"
                 )
             else:
+                leaving_creative = session_state.current_mode() == session_state.CREATIVE
+                active_project = document_state.get_active_project() if leaving_creative else None
+                active_document = document_state.get_active_document() if leaving_creative else None
+
                 session_state.set_mode(session_state.COMPANION)
-                console.print(
-                    "[dim]Companion mode on -- conversation-first. "
-                    "Say /talk again to leave.[/dim]\n"
-                )
+
+                if leaving_creative and (active_project or active_document):
+                    console.print(
+                        f"[dim]Leaving creative mode -- "
+                        f"{f'project {active_project!r}' if active_project else 'the active document'} "
+                        "is still selected and will resume if you go back with /creative. "
+                        "Companion mode on. Say /talk again to leave.[/dim]\n"
+                    )
+                else:
+                    console.print(
+                        "[dim]Companion mode on -- conversation-first. "
+                        "Say /talk again to leave.[/dim]\n"
+                    )
 
             continue
 
