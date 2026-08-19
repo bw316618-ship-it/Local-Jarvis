@@ -97,11 +97,7 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "get_current_time",
             "description": "Get the current local date and time.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
@@ -111,12 +107,7 @@ TOOL_SCHEMAS = [
             "description": "Evaluate a basic arithmetic expression.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "expression": {
-                        "type": "string",
-                        "description": "The expression to evaluate.",
-                    },
-                },
+                "properties": {"expression": {"type": "string", "description": "The expression to evaluate."}},
                 "required": ["expression"],
             },
         },
@@ -128,12 +119,7 @@ TOOL_SCHEMAS = [
             "description": "List files and subfolders inside a known directory.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Directory path.",
-                    },
-                },
+                "properties": {"path": {"type": "string", "description": "Directory path."}},
                 "required": [],
             },
         },
@@ -191,7 +177,6 @@ TOOL_FUNCTIONS.update(NEARBY_TOOL_FUNCTIONS)
 TOOL_FUNCTIONS.update(ROUTING_TOOL_FUNCTIONS)
 TOOL_FUNCTIONS.update(MAPS_TOOL_FUNCTIONS)
 TOOL_FUNCTIONS.update(WEATHER_TOOL_FUNCTIONS)
-TOOL_FUNCTIONS.update(CREATIVE_TOOL_FUNCTIONS)
 
 RISKY_TOOLS = set()
 RISKY_TOOLS |= SYSTEM_RISKY_TOOLS
@@ -213,4 +198,3 @@ RISKY_TOOLS |= NEARBY_RISKY_TOOLS
 RISKY_TOOLS |= ROUTING_RISKY_TOOLS
 RISKY_TOOLS |= MAPS_RISKY_TOOLS
 RISKY_TOOLS |= WEATHER_RISKY_TOOLS
-RISKY_TOOLS |= CREATIVE_RISKY_TOOLS

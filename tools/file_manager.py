@@ -2,21 +2,11 @@
 File management tools for Jarvis.
 
 All read/write/delete operations are sandboxed to a single `workspace/`
-directory at the project root. This is deliberate: the model decides which
-tool calls to make, so giving it unrestricted filesystem access would mean
-one bad tool call (or a prompt-injected one, e.g. from ingested document
-content) could read or destroy files anywhere on your machine. Confining it
-to a workspace folder means the worst case is Jarvis makes a mess of its own
-sandbox, not your system.
-
-Move files in and out of workspace/ manually if you want Jarvis to work on
-them. If you need broader access later, that's a deliberate choice to make
-by widening _safe_path, not a default to fall into.
+directory at the project root.
 """
 
 from pathlib import Path
 
-# Project root (Local-Jarvis/), then a dedicated sandbox folder inside it.
 BASE_DIR = Path(__file__).resolve().parent.parent
 WORKSPACE_DIR = BASE_DIR / "workspace"
 WORKSPACE_DIR.mkdir(exist_ok=True)
@@ -25,13 +15,19 @@ MAX_READ_CHARS = 8000
 
 
 def _safe_path(path: str) -> Path:
-    """Resolve `path` relative to WORKSPACE_DIR and refuse to leave it."""
+    """Resolve any supplied path inside WORKSPACE_DIR."""
     candidate = Path(path)
 
-    # Strip a leading root/drive so an absolute path can't escape the
-    # sandbox by pointing somewhere else entirely.
     if candidate.is_absolute():
-        candidate = Path(*candidate.parts[1:])
+        parts = list(candidate.parts)
+
+        if candidate.drive:
+            parts = parts[1:]
+
+        if parts and parts[0] in (candidate.anchor, "/", "\\"):
+            parts = parts[1:]
+
+        candidate = Path(*parts)
 
     target = (WORKSPACE_DIR / candidate).resolve()
 
@@ -43,12 +39,7 @@ def _safe_path(path: str) -> Path:
     return target
 
 
-# ---------------------------------------------------------------------------
-# Tool implementations
-# ---------------------------------------------------------------------------
-
 def read_file(path: str) -> str:
-    """Read a text file from the workspace."""
     try:
         target = _safe_path(path)
     except ValueError as e:
@@ -62,12 +53,11 @@ def read_file(path: str) -> str:
     content = target.read_text(encoding="utf-8", errors="replace")
     if len(content) > MAX_READ_CHARS:
         remaining = len(content) - MAX_READ_CHARS
-        return content[:MAX_READ_CHARS] + f"\n\n[... truncated, {remaining} more characters ...]"
+        return content[:MAX_READ_CHARS] + f"\n[... truncated, {remaining} more characters ...]"
     return content
 
 
 def write_file(path: str, content: str, append: bool = False) -> str:
-    """Write (or append to) a text file in the workspace, creating folders as needed."""
     try:
         target = _safe_path(path)
     except ValueError as e:
@@ -84,7 +74,6 @@ def write_file(path: str, content: str, append: bool = False) -> str:
 
 
 def delete_file(path: str) -> str:
-    """Delete a single file in the workspace. Refuses to delete directories."""
     try:
         target = _safe_path(path)
     except ValueError as e:
@@ -100,7 +89,6 @@ def delete_file(path: str) -> str:
 
 
 def list_workspace(path: str = ".") -> str:
-    """List files and folders inside the Jarvis workspace."""
     try:
         target = _safe_path(path)
     except ValueError as e:
@@ -113,10 +101,6 @@ def list_workspace(path: str = ".") -> str:
     return "\n".join(entries) if entries else "(empty)"
 
 
-# ---------------------------------------------------------------------------
-# Schemas (Ollama / OpenAI-style function-calling format)
-# ---------------------------------------------------------------------------
-
 FILE_TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -125,12 +109,7 @@ FILE_TOOL_SCHEMAS = [
             "description": "Read the contents of a text file from the Jarvis workspace folder.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file, relative to the workspace folder.",
-                    },
-                },
+                "properties": {"path": {"type": "string", "description": "Path to the file, relative to the workspace folder."}},
                 "required": ["path"],
             },
         },
@@ -139,25 +118,13 @@ FILE_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": (
-                "Write text to a file in the Jarvis workspace folder, creating it "
-                "(and any parent folders) if it doesn't exist. Overwrites by default."
-            ),
+            "description": "Write text to a file in the Jarvis workspace folder.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file, relative to the workspace folder.",
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Text content to write to the file.",
-                    },
-                    "append": {
-                        "type": "boolean",
-                        "description": "If true, append to the file instead of overwriting it. Defaults to false.",
-                    },
+                    "path": {"type": "string", "description": "Path to the file, relative to the workspace folder."},
+                    "content": {"type": "string", "description": "Text content to write to the file."},
+                    "append": {"type": "boolean", "description": "Append instead of overwrite."},
                 },
                 "required": ["path", "content"],
             },
@@ -167,15 +134,10 @@ FILE_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "delete_file",
-            "description": "Delete a single file (not a directory) from the Jarvis workspace folder.",
+            "description": "Delete a single file from the Jarvis workspace folder.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path to the file, relative to the workspace folder.",
-                    },
-                },
+                "properties": {"path": {"type": "string", "description": "Path to the file, relative to the workspace folder."}},
                 "required": ["path"],
             },
         },
@@ -187,12 +149,7 @@ FILE_TOOL_SCHEMAS = [
             "description": "List files and folders inside the Jarvis workspace folder.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Subfolder to list, relative to the workspace folder. Defaults to the workspace root.",
-                    },
-                },
+                "properties": {"path": {"type": "string", "description": "Subfolder to list, relative to the workspace folder."}},
                 "required": [],
             },
         },

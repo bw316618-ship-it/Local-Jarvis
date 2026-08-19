@@ -1,6 +1,4 @@
-"""
-Tools that control Jarvis's session state and interaction mode.
-"""
+"""Tools that control Jarvis's session state and interaction mode."""
 
 from voice import session_state
 
@@ -27,7 +25,7 @@ def enter_companion_mode() -> str:
 
 def exit_companion_mode() -> str:
     session_state.exit_companion_mode()
-    return "Back to normal task mode."
+    return "Back to normal mode."
 
 
 def enter_creative_mode() -> str:
@@ -46,11 +44,7 @@ SESSION_TOOL_SCHEMAS = [
         "function": {
             "name": "mute_jarvis",
             "description": "Mute spoken Jarvis output.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
@@ -58,11 +52,7 @@ SESSION_TOOL_SCHEMAS = [
         "function": {
             "name": "unmute_jarvis",
             "description": "Unmute spoken Jarvis output.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
@@ -70,11 +60,7 @@ SESSION_TOOL_SCHEMAS = [
         "function": {
             "name": "end_session",
             "description": "End the current Jarvis session.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
@@ -82,11 +68,7 @@ SESSION_TOOL_SCHEMAS = [
         "function": {
             "name": "enter_companion_mode",
             "description": "Switch Jarvis into open-ended companion conversation.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
@@ -94,11 +76,7 @@ SESSION_TOOL_SCHEMAS = [
         "function": {
             "name": "exit_companion_mode",
             "description": "Return Jarvis from companion mode to normal task mode.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
@@ -106,11 +84,7 @@ SESSION_TOOL_SCHEMAS = [
         "function": {
             "name": "enter_creative_mode",
             "description": "Switch Jarvis into creative writing/document-collaboration mode.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
@@ -118,11 +92,7 @@ SESSION_TOOL_SCHEMAS = [
         "function": {
             "name": "exit_creative_mode",
             "description": "Return Jarvis from creative mode to normal task mode.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
 ]
@@ -137,4 +107,4 @@ SESSION_TOOL_FUNCTIONS = {
     "exit_creative_mode": exit_creative_mode,
 }
 
-SESSION_RISKY_TOOLS = set()
+SESSION_RISKY_TOOLS = {"end_session"}

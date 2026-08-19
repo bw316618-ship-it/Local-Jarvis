@@ -8,6 +8,7 @@ during retrieval.
 """
 
 import json
+import os
 from pathlib import Path
 
 from pypdf import PdfReader
@@ -83,28 +84,35 @@ def _iter_candidate_files(roots):
         if not root_path.exists():
             continue
 
-        for path in root_path.rglob("*"):
-            if not path.is_file():
-                continue
+        for dirpath, dirnames, filenames in os.walk(root_path):
+            dirnames[:] = [
+                name for name in dirnames
+                if name not in SKIP_DIR_NAMES
+            ]
 
-            resolved = path.resolve()
+            current_dir = Path(dirpath)
 
-            if resolved in excluded or any(ex in resolved.parents for ex in excluded):
-                continue
+            for filename in filenames:
+                path = current_dir / filename
 
-            if any(part in SKIP_DIR_NAMES for part in path.parts):
-                continue
-
-            if path.suffix.lower() not in INDEXABLE_EXTENSIONS:
-                continue
-
-            try:
-                if path.stat().st_size > MAX_FILE_MB * 1024 * 1024:
+                if path.suffix.lower() not in INDEXABLE_EXTENSIONS:
                     continue
-            except OSError:
-                continue
 
-            yield path
+                try:
+                    resolved = path.resolve()
+                except OSError:
+                    continue
+
+                if resolved in excluded or any(ex in resolved.parents for ex in excluded):
+                    continue
+
+                try:
+                    if path.stat().st_size > MAX_FILE_MB * 1024 * 1024:
+                        continue
+                except OSError:
+                    continue
+
+                yield path
 
 
 def count_pending_changes(directories=None) -> int:
@@ -176,6 +184,14 @@ def index_files(directories=None, progress=None) -> str:
 
 def search_files(query: str, k: int = 5) -> str:
     """Semantically search only discovered whole-computer files."""
+    collection = document_store.get_collection()
+
+    if collection.count() == 0:
+        return (
+            "No files are indexed yet. Run /index to index your files "
+            "before searching them."
+        )
+
     result = document_store.search(
         query,
         source_type=document_store.DISCOVERED,
