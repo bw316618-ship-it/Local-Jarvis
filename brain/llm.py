@@ -1,3 +1,4 @@
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
@@ -14,7 +15,11 @@ from tools.session_control import (
     SESSION_TOOL_FUNCTIONS,
     SESSION_RISKY_TOOLS,
 )
-from tools.creative_tools import CREATIVE_TOOL_SCHEMAS, CREATIVE_TOOL_FUNCTIONS, CREATIVE_RISKY_TOOLS
+from tools.creative_tools import (
+    CREATIVE_TOOL_SCHEMAS,
+    CREATIVE_TOOL_FUNCTIONS,
+    CREATIVE_RISKY_TOOLS,
+)
 
 from voice import session_state, document_state
 from brain.mode_config import (
@@ -47,6 +52,8 @@ _MULTI_STEP_HINTS = (
     " finally ",
 )
 
+_CREATIVE_DOCUMENT_EXTENSIONS = (".pdf", ".txt", ".md")
+
 
 def _looks_like_multi_step(message: str) -> bool:
     text = (message or "").strip().lower()
@@ -64,6 +71,57 @@ def _looks_like_multi_step(message: str) -> bool:
         return True
 
     return False
+
+
+def _extract_creative_document_path(message: str):
+    """
+    Return a user-supplied creative-document path when the message clearly
+    presents it as story/source material.
+
+    This is intentionally conservative. It only activates in Creative Mode
+    and requires both a creative-document cue and a supported document suffix.
+    """
+    text = (message or "").strip()
+
+    if not text:
+        return None
+
+    cue_pattern = re.compile(
+        r"\b("
+        r"story\s+(?:pdf|document|file|manuscript)"
+        r"|my\s+(?:story|manuscript)"
+        r"|this\s+is\s+(?:my\s+)?(?:story|manuscript)"
+        r"|here(?:'s| is)\s+(?:my\s+)?(?:story|manuscript)"
+        r"|story\s*:"
+        r")\b",
+        re.IGNORECASE,
+    )
+
+    if not cue_pattern.search(text):
+        return None
+
+    # Prefer a quoted path. This handles Windows paths containing spaces.
+    quoted = re.findall(r'["“](.+?)["”]', text)
+    candidates = quoted[:]
+
+    # Also support an unquoted path at the end of the message.
+    candidates.append(text)
+
+    for candidate in candidates:
+        candidate = candidate.strip().rstrip(".,;")
+
+        # Extract a path ending in one of the supported document types.
+        match = re.search(
+            r'([A-Za-z]:[\\/][^"\r\n]+?\.(?:pdf|txt|md)|'
+            r'(?:/|\.{1,2}[\\/])[^"\r\n]+?\.(?:pdf|txt|md))',
+            candidate,
+            re.IGNORECASE,
+        )
+
+        if match:
+            return match.group(1).rstrip(".,;")
+
+    return None
 
 
 def _default_confirm(name: str, arguments: dict) -> bool:
@@ -314,6 +372,43 @@ class JarvisLLM:
         if len(self.short_term) > max_messages:
             self.short_term = self.short_term[-max_messages:]
 
+    def _handle_creative_document_initialization(
+        self,
+        user_message: str,
+        emit,
+    ):
+        """
+        Deterministically ingest a story document before LLM generation.
+
+        Returns the tool result when a creative-document path is detected,
+        otherwise None.
+        """
+        if self._active_mode() != CREATIVE:
+            return None
+
+        path = _extract_creative_document_path(user_message)
+
+        if not path:
+            return None
+
+        emit(f"Step: ingest_creative_document({{'path': {path!r}}})")
+
+        result = self._run_tool_call(
+            {
+                "function": {
+                    "name": "ingest_creative_document",
+                    "arguments": {"path": path},
+                }
+            }
+        )
+
+        # Record this as a normal completed turn. The next user message can
+        # then use the active document through Creative Mode retrieval.
+        self._update_short_term(user_message, result)
+        remember_turn(user_message, result)
+
+        return result
+
     def chat(
         self,
         user_message: str,
@@ -325,6 +420,17 @@ class JarvisLLM:
 
         mode = self._active_mode()
         mode_config = self._active_config()
+
+        # Creative-document initialization is application-level intent, not
+        # something the local model should have to infer through planning.
+        if mode == CREATIVE:
+            ingestion_result = self._handle_creative_document_initialization(
+                user_message,
+                emit,
+            )
+
+            if ingestion_result is not None:
+                return ingestion_result
 
         try:
             query_embedding = get_embedder().encode(
@@ -491,10 +597,6 @@ class JarvisLLM:
                         "content": result,
                     }
                 )
-
-                # A mode-switch tool changes the registry/prompt for the
-                # NEXT chat() call. Keep the current model round coherent.
-                # The tool result itself tells the model the switch occurred.
 
         if reply is None:
             final_content, _ = self._stream_round(
