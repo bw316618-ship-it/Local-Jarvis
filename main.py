@@ -30,6 +30,7 @@ COMMANDS = [
     ("/voice [N]", "Speak your message -- stops automatically after a pause (or specify N seconds)"),
     ("/wake", "Always-listening mode -- say \"Hey Jarvis\" (Ctrl+C to stop)"),
     ("/speak on|off", "Toggle whether Jarvis speaks its replies aloud"),
+    ("/talk", "Toggle companion mode -- open conversation, no forced tool-calling"),
     ("/save [path]", "Save this session's transcript to a Markdown file"),
     ("/log [n]", "Show the last n tool calls Jarvis has made (default 20)"),
     ("/forget", "Permanently clear Jarvis's long-term conversation memory and facts"),
@@ -119,7 +120,9 @@ def main():
         pass
 
     while True:
-        user_input = console.input("[bold green]You[/bold green] [dim]›[/dim] ")
+        prompt_label = "[bold green]You[/bold green] [dim](talking)[/dim] [dim]›[/dim] " \
+            if session_state.is_companion_mode() else "[bold green]You[/bold green] [dim]›[/dim] "
+        user_input = console.input(prompt_label)
         stripped = user_input.strip()
         lowered = stripped.lower()
 
@@ -217,6 +220,17 @@ def main():
 
         if lowered.startswith("/speak") and lowered not in ("/speak on", "/speak off"):
             console.print("[dim]Usage: /speak on  or  /speak off[/dim]\n")
+            continue
+
+        if lowered == "/talk":
+            now_on = session_state.toggle_companion_mode()
+            if now_on:
+                console.print(
+                    "[dim]Companion mode on -- just talking, no tools unless you ask. "
+                    "Say /talk again (or 'back to normal') to leave.[/dim]\n"
+                )
+            else:
+                console.print("[dim]Companion mode off -- back to normal, full tool access.[/dim]\n")
             continue
 
         if lowered == "/index":
