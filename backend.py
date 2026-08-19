@@ -1,26 +1,3 @@
-"""
-Jarvis Backend — Step 14.1
-Persistent authenticated backend with live LAN device pairing.
-
-This fixes the Step 14 phone loop:
-
-- Untrusted devices remain connected while waiting for approval.
-- Trusted devices receive a `device_access_request`.
-- The trusted HUD answers with `device_approval`.
-- Approval creates and persists a token.
-- The token is sent once to the waiting device.
-- The waiting device becomes authenticated on the SAME WebSocket.
-- The authenticated device can immediately use Jarvis.
-- Future connections authenticate with the stored token.
-
-Compatible with the current hud.js protocol:
-    device_access_request
-    device_approval
-    auth_pending
-    auth_denied
-    auth_granted
-"""
-
 import asyncio
 import json
 import threading
@@ -225,6 +202,58 @@ class JarvisBackend:
                 return
 
             # ----------------------------------------------------------
+            # First-ever device: bootstrap it directly.
+            #
+            # The normal pairing flow below waits for an ALREADY-trusted
+            # device to approve the newcomer. On a fresh install (no
+            # trusted_devices.json entries yet) there is no trusted
+            # device to do that approving -- including for the HUD
+            # itself, which is usually the very first thing to connect
+            # when jarvis_backend_daemon.py opens a browser tab. Without
+            # this branch, that connection just sits waiting up to 120s
+            # for an approver that can never exist, then gets denied --
+            # so the HUD never reaches _authenticated_loop() and never
+            # receives ANY "state" (thinking/idle/speaking/...) or
+            # "reply_chunk" messages, no matter how long you wait.
+            #
+            # This calls the bootstrap_device() method security/devices.py
+            # already documents for exactly this purpose -- it just was
+            # never actually wired up anywhere.
+            # ----------------------------------------------------------
+
+            if not self.auth.list_devices():
+                try:
+                    bootstrap_token = self.auth.bootstrap_device(
+                        device["device_id"],
+                        device["device_type"],
+                        device["name"],
+                    )
+                except RuntimeError:
+                    # Lost a race with another device bootstrapping first
+                    # (e.g. HUD and a paired PC connecting at the same
+                    # instant). Fall through to normal pairing below.
+                    bootstrap_token = None
+
+                if bootstrap_token is not None:
+                    trusted = self.auth.authenticate(
+                        device["device_id"],
+                        bootstrap_token,
+                    )
+
+                    await self._mark_authenticated(
+                        websocket,
+                        trusted,
+                        token=bootstrap_token,
+                        bootstrap=True,
+                    )
+
+                    await self._authenticated_loop(
+                        websocket
+                    )
+
+                    return
+
+            # ----------------------------------------------------------
             # Unknown device: keep connection open for pairing.
             # ----------------------------------------------------------
 
@@ -382,6 +411,7 @@ class JarvisBackend:
         websocket,
         device,
         token=None,
+        bootstrap=False,
     ):
         with self._lock:
             self._authenticated[
@@ -397,10 +427,12 @@ class JarvisBackend:
             },
         }
 
-        # Only include the raw token during the initial pairing.
+        # Only include the raw token during the initial pairing/bootstrap
+        # -- a reconnecting already-trusted device already has it and
+        # doesn't need it sent again.
         if token:
             payload["token"] = token
-            payload["bootstrap"] = False
+            payload["bootstrap"] = bootstrap
 
         await self._send(
             websocket,
