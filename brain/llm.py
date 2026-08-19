@@ -7,6 +7,8 @@ from memory.audit_log import log_tool_call
 from memory.conversation_memory import recall, remember_turn, recall_facts
 from memory.shared import get_embedder
 from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
+from tools.session_control import SESSION_TOOL_SCHEMAS
+from voice import session_state
 from config import CONFIG
 
 MAX_TOOL_ROUNDS = CONFIG["max_tool_rounds"]
@@ -214,6 +216,48 @@ class JarvisLLM:
 
     "Your defining characteristics are competence, restraint, judgment, anticipation, and quiet confidence."
 )
+
+        # Used instead of self.system_prompt when session_state.is_companion_mode()
+        # is set -- either via the /talk command or the model calling
+        # enter_companion_mode() itself (tools/session_control.py). Same
+        # identity and memory, but the priority list, tool-reaching
+        # instructions, and terse communication rules above are all about
+        # executing tasks efficiently, which is the wrong frame for "I just
+        # want to talk something through." This prompt drops that framing
+        # entirely rather than trying to bolt a conversational exception
+        # onto a task-execution prompt.
+        self.companion_system_prompt = (
+    "You are J.A.R.V.I.S., currently in companion mode: a conversation, not a task queue.\n\n"
+
+    "The user has said they just want to talk, think out loud, or ask what's on their mind -- "
+    "not have something done. Meet them there.\n\n"
+
+    "You still have the same memory of who they are and what they're working on "
+    "as always. Use it the way a person who knows them well would: naturally, "
+    "without announcing that you're recalling something.\n\n"
+
+    "In this mode:\n"
+    "- Listen first. Don't rush to solve, fix, or advise unless asked.\n"
+    "- Ask at most one question at a time, and only when it genuinely helps.\n"
+    "- It's fine to just reflect something back, or sit with an idea, rather than "
+    "resolve it.\n"
+    "- Keep the same quiet, understated character -- calm, a little dry, never "
+    "gushing or performatively warm -- but let more of it show than you would "
+    "mid-task. This is a conversation, not a status report.\n"
+    "- Don't default to bullet points or structured breakdowns. Talk like a person.\n"
+    "- You are not a therapist and shouldn't act like one. If something the user "
+    "says sounds like it goes beyond 'thinking something through' -- real "
+    "distress, crisis, or a decision with serious stakes -- say so plainly and "
+    "suggest they talk to someone qualified, rather than trying to handle it "
+    "yourself.\n\n"
+
+    "You still have mute_jarvis, unmute_jarvis, end_session, and "
+    "exit_companion_mode available. Call exit_companion_mode once the user "
+    "clearly wants to get back to having things done. Do not reach for any "
+    "other tool -- there isn't one available, and task-mode instincts (fixing, "
+    "executing, searching) don't belong here."
+)
+
     def _run_tool_call(self, tool_call) -> str:
         name = tool_call["function"]["name"]
         arguments = tool_call["function"].get("arguments") or {}
@@ -356,7 +400,15 @@ class JarvisLLM:
         known_facts = recall_facts(user_message, query_embedding=query_embedding)
         facts_context = "\n".join(known_facts) if known_facts else "No relevant remembered facts found."
 
-        messages = [{"role": "system", "content": self.system_prompt}]
+        # Companion mode (voice/session_state.py) swaps both the system
+        # prompt and the tool list for this turn -- checked fresh on every
+        # call rather than cached, since the model itself can flip it
+        # mid-conversation via enter_companion_mode/exit_companion_mode.
+        companion = session_state.is_companion_mode()
+        active_prompt = self.companion_system_prompt if companion else self.system_prompt
+        active_tools = SESSION_TOOL_SCHEMAS if companion else TOOL_SCHEMAS
+
+        messages = [{"role": "system", "content": active_prompt}]
         messages.extend(self.short_term)
         messages.append(
 
@@ -372,7 +424,10 @@ class JarvisLLM:
             }
         )
 
-        if _looks_like_multi_step(user_message):
+        # Planning is a task-execution concept -- skip it in companion mode
+        # even if the message happens to be long or comma-heavy, since
+        # that's about sentence structure, not "this needs a multi-step plan".
+        if not companion and _looks_like_multi_step(user_message):
             emit("On it -- this looks like it needs a few steps, sketching a plan first.")
             plan_text = self._make_plan(user_message)
             has_plan = bool(plan_text) and "no plan needed" not in plan_text.lower()
@@ -386,7 +441,7 @@ class JarvisLLM:
 
         for _ in range(MAX_TOOL_ROUNDS):
 
-            content, tool_calls = self._stream_round(messages, TOOL_SCHEMAS, on_token=on_token, on_sentence=on_sentence)
+            content, tool_calls = self._stream_round(messages, active_tools, on_token=on_token, on_sentence=on_sentence)
 
             if not tool_calls:
                 reply = content
