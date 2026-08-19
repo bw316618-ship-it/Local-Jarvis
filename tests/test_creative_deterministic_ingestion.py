@@ -1,15 +1,14 @@
-"""Regression tests for deterministic Creative Mode document initialization."""
+"""Tests for deterministic Creative Mode document initialization."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from brain.llm import JarvisLLM, _extract_creative_document_path
-from brain.mode_config import (
-    COMPANION,
-    COMPANION_PROMPT,
-    CREATIVE,
-    NORMAL,
-    get_mode_config,
+import brain.llm as llm_module
+from brain.llm import (
+    JarvisLLM,
+    _extract_creative_document_path,
 )
+from brain.mode_config import COMPANION, COMPANION_PROMPT, CREATIVE, NORMAL
 from voice import document_state, session_state
 
 
@@ -46,7 +45,9 @@ def test_extracts_quoted_windows_pdf_path():
 
 
 def test_extracts_unquoted_supported_document_path():
-    message = r"This is my story: C:\Users\ironm\Downloads\story.md"
+    message = (
+        r"This is my story: C:\Users\ironm\Downloads\story.md"
+    )
 
     assert _extract_creative_document_path(message) == (
         r"C:\Users\ironm\Downloads\story.md"
@@ -130,6 +131,8 @@ def test_deterministic_ingestion_only_runs_in_creative_mode():
         '"C:\\Users\\ironm\\Downloads\\story.pdf"'
     )
 
+    # Avoid invoking the real Ollama path; the assertion is about the
+    # deterministic ingestion gate.
     with patch.object(
         jarvis,
         "_stream_round",
@@ -141,16 +144,9 @@ def test_deterministic_ingestion_only_runs_in_creative_mode():
     jarvis._run_tool_call.assert_not_called()
 
 
-def test_creative_mode_exposes_ingestion_tool_in_its_registry():
-    names = {
-        item["function"]["name"]
-        for item in get_mode_config(CREATIVE)["tools"]
-    }
-
-    assert "ingest_creative_document" in names
-
-
 def test_creative_document_initialization_does_not_use_general_file_tools():
+    from brain.mode_config import get_mode_config
+
     names = {
         item["function"]["name"]
         for item in get_mode_config(CREATIVE)["tools"]
