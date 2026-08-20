@@ -9,31 +9,16 @@ from memory.audit_log import log_tool_call
 from memory.conversation_memory import recall, remember_turn, recall_facts
 from memory.shared import get_embedder
 
-from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
-from tools.session_control import (
-    SESSION_TOOL_SCHEMAS,
-    SESSION_TOOL_FUNCTIONS,
-    SESSION_RISKY_TOOLS,
-)
-from tools.creative_tools import (
-    CREATIVE_TOOL_SCHEMAS,
-    CREATIVE_TOOL_FUNCTIONS,
-    CREATIVE_RISKY_TOOLS,
-    PROJECT_TOOL_FUNCTIONS,
-    PROJECT_RISKY_TOOLS,
-)
-from tools.creative_generation import (
-    CREATIVE_GENERATION_TOOL_SCHEMAS,
-    CREATIVE_GENERATION_TOOL_FUNCTIONS,
-    CREATIVE_GENERATION_RISKY_TOOLS,
-    get_creative_context,
-)
+from tools.tools import TOOL_SCHEMAS
+from tools.session_control import SESSION_TOOL_SCHEMAS
+from tools.creative_generation import get_creative_context
 
 from voice import session_state, document_state
 from brain.mode_config import (
     NORMAL,
     COMPANION,
     CREATIVE,
+    CODING,
     get_mode_config,
 )
 from config import CONFIG
@@ -202,34 +187,14 @@ class JarvisLLM:
         return get_mode_config(self._active_mode())
 
     def _tool_registry_for_mode(self, mode: str):
-        if mode == NORMAL:
-            return TOOL_FUNCTIONS, RISKY_TOOLS
-
-        if mode == COMPANION:
-            return SESSION_TOOL_FUNCTIONS, SESSION_RISKY_TOOLS
-
-        if mode == CREATIVE:
-            # PROJECT_TOOL_FUNCTIONS must be merged in here to match
-            # PROJECT_TOOL_SCHEMAS being offered to the model in
-            # brain/mode_config.py's CREATIVE tool list -- otherwise the
-            # model is told set_creative_project/list_creative_projects/etc.
-            # exist and can be called, but every call resolves to
-            # "Error: unknown tool" since this registry is what
-            # _run_tool_call actually dispatches against.
-            return (
-                {
-                    **SESSION_TOOL_FUNCTIONS,
-                    **CREATIVE_TOOL_FUNCTIONS,
-                    **PROJECT_TOOL_FUNCTIONS,
-                    **CREATIVE_GENERATION_TOOL_FUNCTIONS,
-                },
-                SESSION_RISKY_TOOLS
-                | set(CREATIVE_RISKY_TOOLS)
-                | set(PROJECT_RISKY_TOOLS)
-                | set(CREATIVE_GENERATION_RISKY_TOOLS),
-            )
-
-        raise ValueError(f"Unsupported Jarvis mode: {mode}")
+        # Delegated entirely to mode_config.get_mode_config(), which builds
+        # "tools" (schemas) and "functions"/"risky" (dispatch) from the same
+        # _assemble() call over the same module list -- so there is no
+        # longer a second, hand-maintained copy of "which modules does this
+        # mode include" that schemas and functions could silently diverge
+        # from (see mode_config.py's module docstring for why that mattered).
+        config = get_mode_config(mode)
+        return config["functions"], config["risky"]
 
     def _tool_schemas_for_mode(self, mode: str):
         return get_mode_config(mode)["tools"]
