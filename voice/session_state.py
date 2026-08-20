@@ -12,8 +12,9 @@ import threading
 NORMAL = "normal"
 COMPANION = "companion"
 CREATIVE = "creative"
+CODING = "coding"
 
-VALID_MODES = {NORMAL, COMPANION, CREATIVE}
+VALID_MODES = {NORMAL, COMPANION, CREATIVE, CODING}
 
 _mode_lock = threading.Lock()
 _current_mode = NORMAL
@@ -92,4 +93,12 @@ def enter_creative_mode() -> None:
 
 
 def exit_creative_mode() -> None:
+    set_mode(NORMAL)
+
+
+def enter_coding_mode() -> None:
+    set_mode(CODING)
+
+
+def exit_coding_mode() -> None:
     set_mode(NORMAL)
