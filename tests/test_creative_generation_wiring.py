@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import brain.llm as llm_module
 from brain.llm import JarvisLLM
 from brain.mode_config import COMPANION, CREATIVE, NORMAL, get_mode_config
+from tools import creative_generation
 from voice import document_state, session_state
 
 
@@ -97,7 +98,7 @@ def test_chapter_ideas_tool_can_be_called_through_llm_registry(monkeypatch):
         10,
     )
     monkeypatch.setitem(
-        llm_module.CREATIVE_GENERATION_TOOL_FUNCTIONS,
+        creative_generation.CREATIVE_GENERATION_TOOL_FUNCTIONS,
         "build_chapter_ideas_context",
         lambda request, k=10: (
             "CANON: Arin must choose between the Crown and the Weaver."
@@ -127,7 +128,7 @@ def test_scene_tool_can_be_called_through_llm_registry(monkeypatch):
         10,
     )
     monkeypatch.setitem(
-        llm_module.CREATIVE_GENERATION_TOOL_FUNCTIONS,
+        creative_generation.CREATIVE_GENERATION_TOOL_FUNCTIONS,
         "build_scene_context",
         lambda request, k=10: (
             "CANON: The confrontation occurs beneath the eastern citadel."

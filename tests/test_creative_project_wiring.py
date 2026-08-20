@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from brain.llm import JarvisLLM
-from brain.mode_config import COMPANION, CREATIVE, NORMAL, get_mode_config
+from brain.mode_config import COMPANION, CODING, CREATIVE, NORMAL, get_mode_config
 from tools.creative_tools import PROJECT_TOOL_FUNCTIONS
 from voice import document_state, session_state
 
@@ -47,7 +47,7 @@ def make_jarvis():
 # and should catch the *next* tool added to a schema list and forgotten in
 # the registry, regardless of which tool it is. ---------------------------
 
-@pytest.mark.parametrize("mode", [NORMAL, COMPANION, CREATIVE])
+@pytest.mark.parametrize("mode", [NORMAL, COMPANION, CREATIVE, CODING])
 def test_every_offered_schema_resolves_in_that_modes_registry(mode):
     jarvis = make_jarvis()
     session_state.set_mode(mode)
