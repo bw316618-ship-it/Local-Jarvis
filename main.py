@@ -35,6 +35,8 @@ COMMANDS = [
     ("/creative-off", "Leave creative mode"),
     ("/project <name>", "Activate a named creative project"),
     ("/project", "Show the active creative project"),
+    ("/coding [path]", "Enter coding mode, optionally targeting a repo/folder"),
+    ("/coding-off", "Leave coding mode"),
     ("/save [path]", "Save this session's transcript"),
     ("/log [n]", "Show recent tool calls"),
     ("/forget", "Permanently clear long-term conversation memory"),
@@ -117,9 +119,20 @@ def _print_mode() -> None:
         session_state.NORMAL: "normal",
         session_state.COMPANION: "companion",
         session_state.CREATIVE: "creative",
+        session_state.CODING: "coding",
     }
 
     console.print(f"[dim]Mode: {labels.get(mode, mode)}[/dim]\n")
+
+
+# Short tag shown in the prompt for any non-NORMAL mode. A dict lookup
+# rather than a chain of ternaries, so adding another mode later is one
+# line here instead of another nested branch.
+_PROMPT_MODE_TAGS = {
+    session_state.COMPANION: "talking",
+    session_state.CREATIVE: "creative",
+    session_state.CODING: "coding",
+}
 
 
 def main():
@@ -174,17 +187,11 @@ def main():
 
     while True:
         mode = session_state.current_mode()
-
+        tag = _PROMPT_MODE_TAGS.get(mode)
         prompt_label = (
-            "[bold green]You[/bold green] "
-            "[dim](talking)[/dim] [dim]›[/dim] "
-            if mode == session_state.COMPANION
-            else (
-                "[bold green]You[/bold green] "
-                "[dim](creative)[/dim] [dim]›[/dim] "
-                if mode == session_state.CREATIVE
-                else "[bold green]You[/bold green] [dim]›[/dim] "
-            )
+            f"[bold green]You[/bold green] [dim]({tag})[/dim] [dim]›[/dim] "
+            if tag
+            else "[bold green]You[/bold green] [dim]›[/dim] "
         )
 
         user_input = console.input(prompt_label)
@@ -429,6 +436,33 @@ def main():
             console.print(
                 f"[dim]{set_creative_project(project_name)}[/dim]\n"
             )
+            continue
+
+        if lowered == "/coding-off":
+            session_state.set_mode(session_state.NORMAL)
+            console.print(
+                "[dim]Coding mode off -- back to normal task mode.[/dim]\n"
+            )
+            continue
+
+        if lowered == "/coding" or lowered.startswith("/coding "):
+            parts = stripped.split(maxsplit=1)
+
+            session_state.set_mode(session_state.CODING)
+
+            if len(parts) == 2:
+                from tools.git_tools import git_status
+
+                console.print(
+                    f"[dim]Coding mode on, targeting '{parts[1]}':[/dim]\n"
+                    f"[dim]{git_status(parts[1])}[/dim]\n"
+                )
+            else:
+                console.print(
+                    "[dim]Coding mode on. Tell Jarvis which repo/folder "
+                    "to work in, or it'll default to the current directory.[/dim]\n"
+                )
+
             continue
 
         if lowered == "/index":
