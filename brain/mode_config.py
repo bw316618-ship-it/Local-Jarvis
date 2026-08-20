@@ -1,14 +1,34 @@
-"""Mode configuration for Jarvis."""
+"""Mode configuration for Jarvis.
 
-from tools.tools import TOOL_SCHEMAS
-from tools.session_control import SESSION_TOOL_SCHEMAS
-from tools.creative_tools import CREATIVE_TOOL_SCHEMAS
-from tools.creative_tools import PROJECT_TOOL_SCHEMAS
-from tools.creative_generation import CREATIVE_GENERATION_TOOL_SCHEMAS
+Each mode is assembled from (schemas, functions, risky) triples pulled
+straight from the underlying tool modules -- never listed separately.
+This is deliberate: the project's one critical bug so far (CREATIVE mode
+offering PROJECT_TOOL_SCHEMAS to the model while brain/llm.py's dispatch
+registry never got the matching PROJECT_TOOL_FUNCTIONS) happened because
+schemas were assembled here while functions were hand-maintained in a
+separate if/elif chain in brain/llm.py. Building "tools", "functions",
+and "risky" from the same _assemble() call over the same module list
+makes that class of bug structurally impossible going forward: you
+cannot add a schema without its function coming along for free.
+"""
+
+from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
+from tools.session_control import SESSION_TOOL_SCHEMAS, SESSION_TOOL_FUNCTIONS, SESSION_RISKY_TOOLS
+from tools.creative_tools import (
+    CREATIVE_TOOL_SCHEMAS, CREATIVE_TOOL_FUNCTIONS, CREATIVE_RISKY_TOOLS,
+    PROJECT_TOOL_SCHEMAS, PROJECT_TOOL_FUNCTIONS, PROJECT_RISKY_TOOLS,
+)
+from tools.creative_generation import (
+    CREATIVE_GENERATION_TOOL_SCHEMAS, CREATIVE_GENERATION_TOOL_FUNCTIONS, CREATIVE_GENERATION_RISKY_TOOLS,
+)
+from tools.git_tools import GIT_TOOL_SCHEMAS, GIT_TOOL_FUNCTIONS, GIT_RISKY_TOOLS
+from tools.file_manager import FILE_TOOL_SCHEMAS, FILE_TOOL_FUNCTIONS
+from tools.coding_tools import CODING_TOOL_SCHEMAS, CODING_TOOL_FUNCTIONS, CODING_RISKY_TOOLS
 
 NORMAL = "normal"
 COMPANION = "companion"
 CREATIVE = "creative"
+CODING = "coding"
 
 COMPANION_PROMPT = (
     "You are J.A.R.V.I.S. in companion mode. This is an ongoing conversation, "
@@ -46,32 +66,100 @@ CREATIVE_PROMPT = (
     "existing story facts."
 )
 
-MODE_CONFIGS = {
-    NORMAL: {
-        "prompt": None,
-        "tools": TOOL_SCHEMAS,
-        "planning": True,
-    },
-    COMPANION: {
-        "prompt": COMPANION_PROMPT,
-        "tools": SESSION_TOOL_SCHEMAS,
-        "planning": False,
-    },
-    CREATIVE: {
-        "prompt": CREATIVE_PROMPT,
-        "tools": (
-            SESSION_TOOL_SCHEMAS
-            + CREATIVE_TOOL_SCHEMAS
-            + PROJECT_TOOL_SCHEMAS
-            + CREATIVE_GENERATION_TOOL_SCHEMAS
-        ),
-        "planning": False,
-    },
+CODING_PROMPT = (
+    "You are J.A.R.V.I.S. in coding mode. Work as a careful, direct engineering "
+    "collaborator -- correctness first, brevity in explanation.\n\n"
+    "Prefer read_file/write_file/list_workspace for files inside the Jarvis "
+    "workspace, and the git_* tools for any repo, anywhere on disk, by passing "
+    "repo_path. run_tests, run_python_file, lint_python, and search_code also "
+    "take a path and are not limited to the workspace.\n\n"
+    "Before changing code, read the relevant file(s) first -- do not guess at "
+    "current contents. Before claiming a fix works, run the tests. State "
+    "clearly when you have not run something, rather than assuming it passed.\n\n"
+    "Prefer the smallest correct change over a rewrite. When a change is "
+    "genuinely risky (deleting code, force-pushing, rewriting history), say so "
+    "plainly before doing it -- the confirmation prompt is a backstop, not a "
+    "substitute for flagging it yourself.\n\n"
+    "Do not fabricate test output, command output, or file contents you have "
+    "not actually retrieved this turn."
+)
+
+
+def _assemble(*groups):
+    """Combine any number of (schemas, functions, risky) triples into one
+    mode's (tools, functions, risky). The only way tools enter a mode."""
+    schemas = []
+    functions = {}
+    risky = set()
+    for s, f, r in groups:
+        schemas = schemas + list(s)
+        functions = {**functions, **f}
+        risky = risky | set(r)
+    return schemas, functions, risky
+
+
+_SESSION = (SESSION_TOOL_SCHEMAS, SESSION_TOOL_FUNCTIONS, SESSION_RISKY_TOOLS)
+_CREATIVE = (CREATIVE_TOOL_SCHEMAS, CREATIVE_TOOL_FUNCTIONS, CREATIVE_RISKY_TOOLS)
+_PROJECT = (PROJECT_TOOL_SCHEMAS, PROJECT_TOOL_FUNCTIONS, PROJECT_RISKY_TOOLS)
+_CREATIVE_GENERATION = (
+    CREATIVE_GENERATION_TOOL_SCHEMAS, CREATIVE_GENERATION_TOOL_FUNCTIONS, CREATIVE_GENERATION_RISKY_TOOLS,
+)
+_GIT = (GIT_TOOL_SCHEMAS, GIT_TOOL_FUNCTIONS, GIT_RISKY_TOOLS)
+_WORKSPACE_FILES = (FILE_TOOL_SCHEMAS, FILE_TOOL_FUNCTIONS, set())
+_CODING = (CODING_TOOL_SCHEMAS, CODING_TOOL_FUNCTIONS, CODING_RISKY_TOOLS)
+
+# Groups per multi-module mode. Deliberately *not* pre-assembled into a
+# static dict at import time -- get_mode_config() below calls _assemble()
+# on these fresh on every lookup instead. Two reasons: (1) it keeps
+# dict/set membership dynamic, since a group here holds a reference to the
+# real module-level dict (e.g. CREATIVE_GENERATION_TOOL_FUNCTIONS), and
+# {**d} at call time reads that dict's current contents -- useful for
+# tests that monkeypatch a single tool's implementation and expect
+# dispatch to see it; (2) the cost is a handful of dict merges once per
+# chat turn, immaterial next to an LLM round-trip.
+_MULTI_MODULE_GROUPS = {
+    CREATIVE: (_SESSION, _CREATIVE, _PROJECT, _CREATIVE_GENERATION),
+    CODING: (_SESSION, _WORKSPACE_FILES, _GIT, _CODING),
+}
+
+# NORMAL and COMPANION each pull from exactly one module, so there's no
+# "forgot to merge the second module's functions" failure mode possible --
+# assigned directly (preserving object identity with the source module's
+# constants, which some tests rely on) rather than routed through
+# _assemble(), which always returns fresh containers.
+_SINGLE_MODULE_TOOLS = {
+    NORMAL: (TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS),
+    COMPANION: (SESSION_TOOL_SCHEMAS, SESSION_TOOL_FUNCTIONS, SESSION_RISKY_TOOLS),
+}
+
+_PROMPTS = {
+    NORMAL: None,
+    COMPANION: COMPANION_PROMPT,
+    CREATIVE: CREATIVE_PROMPT,
+    CODING: CODING_PROMPT,
+}
+
+_PLANNING = {
+    NORMAL: True,
+    COMPANION: False,
+    CREATIVE: False,
+    CODING: True,
 }
 
 
 def get_mode_config(mode: str) -> dict:
-    try:
-        return MODE_CONFIGS[mode]
-    except KeyError as e:
-        raise ValueError(f"Unsupported Jarvis mode: {mode}") from e
+    if mode not in _PROMPTS:
+        raise ValueError(f"Unsupported Jarvis mode: {mode}")
+
+    if mode in _SINGLE_MODULE_TOOLS:
+        tools, functions, risky = _SINGLE_MODULE_TOOLS[mode]
+    else:
+        tools, functions, risky = _assemble(*_MULTI_MODULE_GROUPS[mode])
+
+    return {
+        "prompt": _PROMPTS[mode],
+        "tools": tools,
+        "functions": functions,
+        "risky": risky,
+        "planning": _PLANNING[mode],
+    }
