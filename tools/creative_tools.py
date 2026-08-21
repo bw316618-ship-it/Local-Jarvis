@@ -63,14 +63,30 @@ def ingest_creative_document(path: str, category: str = "general") -> str:
     key = str(target)
     project = document_state.get_active_project()
 
+    # Only pin this document as the sole active scope when there's no
+    # project involved -- that's the original single-document workflow
+    # and should keep working exactly as before. But when a project IS
+    # active, pinning here was a real bug: every ingest silently narrowed
+    # retrieval down to just the file you *just* added, undoing the whole
+    # point of a project (search across everything relevant, ranked by
+    # the query, not by whichever file was ingested most recently). A
+    # project with 5 documents should stay searchable across all 5 after
+    # adding a 6th -- get_creative_context() already does relevance-based
+    # retrieval across every document in the active project as long as no
+    # single document is explicitly pinned via set_creative_document.
+    pin_as_active = not project
+
     if state.get(key) == current_mtime:
-        document_state.set_active_document(key)
+        if pin_as_active:
+            document_state.set_active_document(key)
         if project:
             project_memory.add_document(project, key)
-        return (
-            f"Creative document already indexed: '{target}'. "
+        scope_note = (
             "Made it the active document."
+            if pin_as_active
+            else f"Added to project '{project}'; project-wide search remains active."
         )
+        return f"Creative document already indexed: '{target}'. {scope_note}"
 
     try:
         text = _read_document(target)
@@ -97,11 +113,17 @@ def ingest_creative_document(path: str, category: str = "general") -> str:
     if project:
         project_memory.add_document(project, key)
 
-    document_state.set_active_document(key)
+    if pin_as_active:
+        document_state.set_active_document(key)
 
+    scope_note = (
+        "made it the active document."
+        if pin_as_active
+        else f"added it to project '{project}' (project-wide search remains active)."
+    )
     return (
         f"Creative document ingested: '{target}'. "
-        f"Indexed {chunk_count} passages and made it the active document."
+        f"Indexed {chunk_count} passages and {scope_note}"
     )
 
 
