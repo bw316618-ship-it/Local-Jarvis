@@ -7,11 +7,11 @@ from voice import document_state
 
 
 def setup_function():
-    document_state.clear_active_document()
+    document_state.clear_scope()
 
 
 def teardown_function():
-    document_state.clear_active_document()
+    document_state.clear_scope()
 
 
 def test_creative_registry_contains_document_operations():
@@ -80,6 +80,58 @@ def test_ingest_indexes_as_manual_and_activates_document(tmp_path):
     assert args[2] == creative_tools.document_store.MANUAL
     assert args[5] is fake_state
     save_state.assert_called_once()
+
+
+def test_ingest_with_active_project_does_not_pin_active_document(tmp_path, monkeypatch):
+    """Regression test for the bug behind 'my creative mode still only takes
+    one active document even with a project active' -- ingest_creative_document
+    used to unconditionally call set_active_document, so adding a 2nd/3rd/4th
+    file to a project silently narrowed retrieval down to just the file you
+    most recently added, undoing project-wide search. With a project active,
+    ingestion should leave the document scope alone so get_creative_context's
+    project-wide, relevance-ranked retrieval keeps covering every file."""
+    import memory.project_memory as project_memory
+    monkeypatch.setattr(project_memory, "PROJECTS_PATH", tmp_path / "creative_projects.json")
+
+    document_state.set_active_project("The Crownbreaker")
+
+    story = tmp_path / "chapter2.txt"
+    story.write_text("Arin returns to the capital.", encoding="utf-8")
+
+    with patch.object(
+        creative_tools.document_store, "load_state", return_value={}
+    ), patch.object(
+        creative_tools.document_store, "index_one_file", return_value=3
+    ), patch.object(
+        creative_tools.document_store, "save_state"
+    ):
+        result = creative_tools.ingest_creative_document(str(story))
+
+    assert "ingested" in result.lower()
+    assert "project" in result.lower()
+    # The whole point: no single document should get pinned while a
+    # project is active, so project-wide retrieval keeps spanning every
+    # indexed file rather than narrowing to whichever was added last.
+    assert document_state.get_active_document() is None
+    assert document_state.get_active_project() == "The Crownbreaker"
+
+
+def test_ingest_without_active_project_still_pins_active_document(tmp_path):
+    """The original single-document workflow (no project involved at all)
+    must keep working exactly as before -- this is what
+    test_ingest_indexes_as_manual_and_activates_document already covers for
+    the fresh-index path; this covers the already-indexed/unchanged path."""
+    story = tmp_path / "story.txt"
+    story.write_text("Chapter one.", encoding="utf-8")
+    fake_state = {str(story.resolve()): story.stat().st_mtime}
+
+    with patch.object(
+        creative_tools.document_store, "load_state", return_value=fake_state
+    ):
+        result = creative_tools.ingest_creative_document(str(story))
+
+    assert "already indexed" in result.lower()
+    assert document_state.get_active_document() == str(story.resolve())
 
 
 def test_ingest_extracts_pdf_text(tmp_path):
