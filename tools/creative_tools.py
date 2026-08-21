@@ -24,6 +24,13 @@ def _read_document(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
+def _project_document_set(project: str) -> set:
+    return {
+        str(Path(path).expanduser().resolve())
+        for path in project_memory.get_document_paths(project)
+    }
+
+
 def set_creative_document(path: str) -> str:
     target = Path(path).expanduser().resolve()
 
@@ -35,6 +42,17 @@ def set_creative_document(path: str) -> str:
         return (
             f"Unsupported creative document type '{target.suffix}'. "
             f"Supported types: {', '.join(sorted(SUPPORTED_DOCUMENTS))}."
+        )
+
+    project = document_state.get_active_project()
+
+    # A document selected inside a project must be one of that project's
+    # registered documents. This prevents an old active-document value from
+    # escaping the project boundary.
+    if project and str(target) not in _project_document_set(project):
+        return (
+            f"Document '{target}' is not registered in active creative "
+            f"project '{project}'."
         )
 
     active = document_state.set_active_document(str(target))
@@ -63,17 +81,8 @@ def ingest_creative_document(path: str, category: str = "general") -> str:
     key = str(target)
     project = document_state.get_active_project()
 
-    # Only pin this document as the sole active scope when there's no
-    # project involved -- that's the original single-document workflow
-    # and should keep working exactly as before. But when a project IS
-    # active, pinning here was a real bug: every ingest silently narrowed
-    # retrieval down to just the file you *just* added, undoing the whole
-    # point of a project (search across everything relevant, ranked by
-    # the query, not by whichever file was ingested most recently). A
-    # project with 5 documents should stay searchable across all 5 after
-    # adding a 6th -- get_creative_context() already does relevance-based
-    # retrieval across every document in the active project as long as no
-    # single document is explicitly pinned via set_creative_document.
+    # With a project active, ingestion registers the file but does not
+    # silently narrow project-wide retrieval to the newly ingested file.
     pin_as_active = not project
 
     if state.get(key) == current_mtime:
@@ -133,10 +142,21 @@ def get_creative_document() -> str:
     if not active:
         return "No creative document is active."
 
+    project = document_state.get_active_project()
+
+    # If runtime state was contaminated by an old document, clear it before
+    # exposing it or allowing generation to use it.
+    if project and str(Path(active).expanduser().resolve()) not in _project_document_set(project):
+        document_state.clear_active_document()
+        return (
+            f"No creative document is active. The previous document was not "
+            f"registered in project '{project}' and was discarded."
+        )
+
     return f"Active creative document: '{active}'."
 
 
-def clear_creative_document() -> str:
+def clear_creative_document() -> None:
     document_state.clear_active_document()
     return "Creative document cleared."
 
@@ -150,11 +170,21 @@ def search_creative_document(query: str, k: int = 6) -> str:
             "with set_creative_document or ingest_creative_document first."
         )
 
+    project = document_state.get_active_project()
+
+    if project and str(Path(active).expanduser().resolve()) not in _project_document_set(project):
+        document_state.clear_active_document()
+        return (
+            f"Error: active document is not registered in project '{project}' "
+            "and was cleared."
+        )
+
     result = document_store.search(
         query,
         source_type=document_store.MANUAL,
         k=k,
         source=active,
+        project=project,
     )
 
     documents = result["documents"]
@@ -248,7 +278,6 @@ CREATIVE_TOOL_FUNCTIONS = {
 CREATIVE_RISKY_TOOLS = set()
 
 
-# Separate project contract.
 def set_creative_project(name: str) -> str:
     try:
         record = project_memory.ensure_project(name)
