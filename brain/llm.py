@@ -21,7 +21,7 @@ from brain.mode_config import (
     CODING,
     get_mode_config,
 )
-from config import CONFIG
+from config import CONFIG, get_model_for_mode
 
 
 MAX_TOOL_ROUNDS = CONFIG["max_tool_rounds"]
@@ -151,8 +151,14 @@ def _default_on_step(message: str) -> None:
 
 
 class JarvisLLM:
+    # Safe default for test doubles built via JarvisLLM.__new__(JarvisLLM),
+    # which skip __init__ entirely -- without this, chat()'s per-mode model
+    # resolution below would AttributeError on any such instance.
+    _explicit_model_override = None
+
     def __init__(self, model=None, confirm_callback=None):
         self.client = Client(host="http://localhost:11434")
+        self._explicit_model_override = model
         self.model = model or CONFIG["model"]
         self.memory = JarvisMemory()
         self.confirm_callback = confirm_callback or _default_confirm
@@ -370,6 +376,14 @@ class JarvisLLM:
         emit = on_step or _default_on_step
         mode = self._active_mode()
         mode_config = self._active_config()
+
+        # Resolve per-mode model for this turn (e.g. a coding-specialized
+        # model for CODING mode via CONFIG["mode_models"]) -- see
+        # config.get_model_for_mode's docstring for precedence rules.
+        # _stream_round/_make_plan both read self.model at call time, so
+        # reassigning it here is all that's needed; neither method's
+        # signature has to change.
+        self.model = get_model_for_mode(mode, explicit=self._explicit_model_override)
 
         if mode == CREATIVE:
             ingestion_result = self._handle_creative_document_initialization(
