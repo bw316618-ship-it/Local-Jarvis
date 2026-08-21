@@ -16,6 +16,17 @@ USER_CONFIG_PATH = BASE_DIR / "jarvis_config.json"
 
 DEFAULTS = {
     "model": "qwen3:4b",
+    "mode_models": {
+        # Per-mode model override. Falls back to "model" above for any
+        # mode not listed here. Useful for e.g. giving CODING mode a
+        # coding-specialized model (qwen2.5-coder:7b, deepseek-coder, etc.)
+        # without switching companion/creative conversations to it too --
+        # those benefit more from a general-purpose model's tone than a
+        # code-specialized one's. Example override in jarvis_config.json:
+        #   "mode_models": {"coding": "qwen2.5-coder:7b"}
+        # Note this replaces the whole mapping, not just the key you set --
+        # same as every other dict/list value in this config.
+    },
     "num_ctx": 8192,
     "max_tool_rounds": 15,
     "short_term_turns": 6,
@@ -81,6 +92,21 @@ def get_index_roots() -> list[str]:
         str(Path.home() / "Desktop"),
         str(Path.home() / "Downloads"),
     ]
+
+
+def get_model_for_mode(mode: str, explicit: str = None) -> str:
+    """Resolve which Ollama model to use for a given Jarvis mode.
+
+    Precedence: an explicit override (e.g. JarvisLLM(model=...)) always
+    wins: it's a deliberate choice by whoever constructed the LLM, and
+    should not be silently superseded by mode-based config. Otherwise,
+    CONFIG["mode_models"] is checked for the active mode; falling back to
+    CONFIG["model"] if that mode isn't listed. Reads CONFIG live, same as
+    get_index_roots(), so runtime config changes take effect immediately.
+    """
+    if explicit:
+        return explicit
+    return CONFIG.get("mode_models", {}).get(mode) or CONFIG["model"]
 
 
 CONFIG = _build_config()
