@@ -5,9 +5,10 @@ Documents are tagged with source_type:
 - "manual": deliberately ingested knowledge-base documents.
 - "discovered": automatically indexed local files.
 
-Search can additionally be scoped to an exact source path or named creative
-project. Project metadata is optional and does not change the existing
-path -> mtime incremental-index state contract.
+Creative projects are hard retrieval boundaries. When `project` is supplied,
+the project's registered document paths are used as the authoritative source
+allowlist. Chroma's stored `project` metadata is deliberately NOT trusted as
+the project boundary because old indexed chunks can contain stale metadata.
 """
 
 import json
@@ -110,6 +111,18 @@ def search(
     source: str = None,
     project: str = None,
 ) -> dict:
+    """Search indexed documents with explicit creative/project scoping.
+
+    `source` means one exact document.
+
+    `project` means the active project's REGISTERED document paths. The
+    registry is authoritative. Stored vector metadata is not sufficient to
+    establish project membership because an old indexed document can retain
+    stale `project` metadata after it is removed from the project.
+
+    Keeping `project` in the function signature is intentional: existing
+    callers and tests use it as the public project-scope argument.
+    """
     if source_type not in {MANUAL, DISCOVERED}:
         raise ValueError(f"Unknown document source_type: {source_type}")
 
@@ -126,13 +139,45 @@ def search(
 
     conditions = [{"source_type": source_type}]
 
+    if project is not None:
+        # Import lazily to avoid coupling module initialization to the
+        # persistent project registry.
+        from memory import project_memory
+
+        registered = project_memory.get_document_paths(project)
+        registered = [
+            str(Path(path).expanduser().resolve())
+            for path in registered
+            if path
+        ]
+
+        # An active project with no registered documents must search nothing.
+        if not registered:
+            return {"documents": [], "metadatas": []}
+
+        # This is the critical security/grounding boundary. Do not also add
+        # `{"project": project}` here: the registry, not stale vector
+        # metadata, defines current project membership.
+        conditions.append({"source": {"$in": registered}})
+
     if source is not None:
-        conditions.append(
-            {"source": str(Path(source).expanduser().resolve())}
+        normalized_source = str(
+            Path(source).expanduser().resolve()
         )
 
-    if project is not None:
-        conditions.append({"project": project})
+        # If both project and source are supplied, the exact document must
+        # also belong to the active project's registry.
+        if project is not None:
+            from memory import project_memory
+
+            registered = {
+                str(Path(path).expanduser().resolve())
+                for path in project_memory.get_document_paths(project)
+            }
+            if normalized_source not in registered:
+                return {"documents": [], "metadatas": []}
+
+        conditions.append({"source": normalized_source})
 
     if len(conditions) == 1:
         where = conditions[0]
