@@ -71,7 +71,15 @@ def test_chat_uses_task_prompt_and_full_tools_by_default(monkeypatch):
     monkeypatch.setattr(llm_module, "recall_facts", lambda *a, **k: [])
     jarvis.chat("what is 6*7", on_step=lambda m: None)
     assert captured[0][0] == "TASK-MODE-PROMPT"
-    assert captured[0][1] is llm_module.TOOL_SCHEMAS
+    # Relevance filtering (brain/tool_relevance.py) now narrows NORMAL
+    # mode's offered tools per turn for non-trivial messages, so this can
+    # no longer assert exact identity with the full TOOL_SCHEMAS list --
+    # what actually matters is that nothing foreign leaked in and that
+    # session-control tools are always reachable regardless of ranking.
+    result_names = {t["function"]["name"] for t in captured[0][1]}
+    full_names = {t["function"]["name"] for t in llm_module.TOOL_SCHEMAS}
+    assert result_names <= full_names
+    assert "mute_jarvis" in result_names
 
 
 def test_chat_uses_companion_prompt_and_limited_tools_when_flag_set(monkeypatch):
@@ -119,7 +127,10 @@ def test_model_can_exit_companion_mode_via_the_tool_mid_conversation(monkeypatch
         captured.append(tools) or _stream("back to it")
     )
     jarvis.chat("back to work", on_step=lambda m: None)
-    assert captured[0] is llm_module.TOOL_SCHEMAS
+    result_names = {t["function"]["name"] for t in captured[0]}
+    full_names = {t["function"]["name"] for t in llm_module.TOOL_SCHEMAS}
+    assert result_names <= full_names
+    assert "mute_jarvis" in result_names
 
 
 def test_companion_user_message_is_not_framed_as_a_question(monkeypatch):

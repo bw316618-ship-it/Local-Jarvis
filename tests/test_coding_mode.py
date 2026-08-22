@@ -239,6 +239,26 @@ def test_coding_registry_contains_git_file_and_coding_tools():
     assert "run_tests" in risky
 
 
+def test_coding_mode_is_reachable_by_the_model_not_only_the_cli():
+    """enter_coding_mode/exit_coding_mode exist in voice/session_state.py
+    but were never exposed as callable tools -- unlike enter_creative_mode/
+    exit_creative_mode, which the model can call itself. Without this, the
+    model can never switch into coding mode on its own; only /coding
+    typed by a human works."""
+    jarvis = make_jarvis()
+    session_state.set_mode(NORMAL)
+    registry, _ = jarvis._tool_registry_for_mode(NORMAL)
+
+    assert "enter_coding_mode" in registry
+    assert "exit_coding_mode" in registry
+
+    result = jarvis._run_tool_call(
+        {"function": {"name": "enter_coding_mode", "arguments": {}}}
+    )
+    assert "unknown tool" not in result.lower()
+    assert session_state.current_mode() == CODING
+
+
 @pytest.mark.parametrize("other_mode", [NORMAL, COMPANION, CREATIVE])
 def test_coding_only_tools_absent_from_other_modes(other_mode):
     jarvis = make_jarvis()

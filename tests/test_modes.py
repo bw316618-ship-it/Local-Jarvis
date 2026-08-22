@@ -71,7 +71,12 @@ def test_chat_uses_normal_mode_by_default(monkeypatch):
     monkeypatch.setattr(llm_module, "recall_facts", lambda *a, **k: [])
     jarvis.chat("what is 6*7", on_step=lambda m: None)
     assert captured[0][0] == "TASK-MODE-PROMPT"
-    assert captured[0][1] is llm_module.TOOL_SCHEMAS
+    # See tests/test_companion_mode.py's equivalent test for why this is a
+    # subset check rather than identity now that relevance filtering exists.
+    result_names = {t["function"]["name"] for t in captured[0][1]}
+    full_names = {t["function"]["name"] for t in llm_module.TOOL_SCHEMAS}
+    assert result_names <= full_names
+    assert "mute_jarvis" in result_names
 
 
 def test_companion_mode_uses_limited_tools(monkeypatch):
