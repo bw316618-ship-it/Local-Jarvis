@@ -38,6 +38,16 @@ def exit_creative_mode() -> str:
     return "Back to normal mode."
 
 
+def enter_coding_mode() -> str:
+    session_state.enter_coding_mode()
+    return "Coding mode enabled."
+
+
+def exit_coding_mode() -> str:
+    session_state.exit_coding_mode()
+    return "Back to normal mode."
+
+
 SESSION_TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -95,6 +105,22 @@ SESSION_TOOL_SCHEMAS = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "enter_coding_mode",
+            "description": "Switch Jarvis into coding mode (git, file, and dev tools).",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "exit_coding_mode",
+            "description": "Return Jarvis from coding mode to normal task mode.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 SESSION_TOOL_FUNCTIONS = {
@@ -105,6 +131,8 @@ SESSION_TOOL_FUNCTIONS = {
     "exit_companion_mode": exit_companion_mode,
     "enter_creative_mode": enter_creative_mode,
     "exit_creative_mode": exit_creative_mode,
+    "enter_coding_mode": enter_coding_mode,
+    "exit_coding_mode": exit_coding_mode,
 }
 
 SESSION_RISKY_TOOLS = {"end_session"}
