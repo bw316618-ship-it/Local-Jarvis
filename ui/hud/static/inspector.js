@@ -455,6 +455,27 @@
         ),
     };
 
+    // Real machine stats pushed by ui/hud_server.py's periodic
+    // system_status broadcast (see hud.js's WebSocket message switch).
+    // Absent until the first broadcast arrives after connecting, so
+    // these rows simply don't appear until then rather than showing
+    // fake placeholder values.
+    const sys = window.JarvisSystemStatus;
+
+    if (sys) {
+      values.CPU =
+        `${Math.round(sys.cpu_percent)}% (${sys.cpu_count} cores)`;
+
+      values.MEM =
+        `${Math.round(sys.memory_percent)}%`;
+
+      values.DISK =
+        `${Math.round(sys.disk_percent)}%`;
+
+      values.UPTIME =
+        formatDuration(sys.uptime_seconds);
+    }
+
     if (memory) {
       values.HEAP =
         `${formatMB(

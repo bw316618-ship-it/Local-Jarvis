@@ -849,6 +849,16 @@ function connect() {
         );
         break;
 
+      case "system_status":
+        // Live CPU/memory/disk/uptime pushed periodically by
+        // ui/hud_server.py's _system_status_loop. Stored on window
+        // rather than handled here directly, matching the existing
+        // window.JarvisDevices pattern -- inspector.js is a deliberately
+        // non-invasive observer that reads shared state rather than
+        // hooking into this socket handler itself.
+        window.JarvisSystemStatus = data;
+        break;
+
       case "error":
         handleError(
           data.text
