@@ -1,0 +1,751 @@
+/* ============================================================
+   JARVIS HUD INSPECTOR
+   Observability layer for the existing Reactor / Storm HUD.
+   ============================================================ */
+
+#hudInspector {
+  position: fixed;
+
+  /*
+   * Keep the Inspector below the top HUD controls.
+   * DO NOT modify #modeToggle from this stylesheet.
+   */
+  top: 78px;
+  right: 22px;
+
+  width: min(360px, calc(100vw - 44px));
+
+  /*
+   * IMPORTANT:
+   * Give the Inspector an actual height.
+   * max-height alone is insufficient for the flex
+   * scrolling structure.
+   */
+  height: calc(100vh - 100px);
+  max-height: calc(100vh - 100px);
+
+  z-index: 900;
+
+  display: flex;
+  flex-direction: column;
+
+  /*
+   * Required for the child scroll viewport.
+   */
+  min-height: 0;
+
+  pointer-events: none;
+
+  color: rgba(235, 250, 255, 0.94);
+
+  font-family:
+    "Segoe UI",
+    "SF Pro Display",
+    Arial,
+    sans-serif;
+
+  opacity: 0;
+
+  transform: translateX(18px);
+
+  transition:
+    opacity 180ms ease,
+    transform 180ms ease;
+}
+
+#hudInspector.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+#hudInspector.collapsed {
+  width: auto;
+}
+
+#hudInspector.collapsed .inspector-body {
+  display: none;
+}
+
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+
+.inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  min-height: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+
+  padding: 0 12px;
+
+  border: 1px solid rgba(120, 210, 255, 0.22);
+  border-bottom: 0;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(7, 17, 26, 0.94),
+      rgba(4, 10, 16, 0.88)
+    );
+
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.35),
+    inset 0 0 30px rgba(70, 180, 255, 0.035);
+
+  pointer-events: auto;
+}
+
+.inspector-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  white-space: nowrap;
+}
+
+.inspector-brand::before {
+  content: "";
+
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+
+  border-radius: 50%;
+
+  background: var(--glow, #74d7ff);
+
+  box-shadow:
+    0 0 8px var(--glow, #74d7ff),
+    0 0 18px var(--glow, #74d7ff);
+}
+
+.inspector-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.inspector-button {
+  width: 27px;
+  height: 27px;
+
+  padding: 0;
+
+  border: 1px solid rgba(150, 220, 255, 0.18);
+
+  background: rgba(255, 255, 255, 0.025);
+  color: rgba(225, 245, 255, 0.72);
+
+  font-size: 11px;
+  cursor: pointer;
+
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.inspector-button:hover {
+  background: rgba(100, 190, 255, 0.08);
+  border-color: rgba(150, 220, 255, 0.4);
+  color: white;
+}
+
+
+/* ============================================================
+   MAIN SCROLL VIEWPORT
+   ============================================================ */
+
+/*
+ * THIS IS THE ONLY SCROLLABLE ELEMENT.
+ */
+
+.inspector-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+
+  /*
+   * The body takes whatever space remains below the header.
+   */
+  flex: 1 1 auto;
+
+  /*
+   * CRITICAL:
+   * Allows a flex child to shrink below its content size.
+   */
+  min-height: 0;
+
+  /*
+   * CRITICAL:
+   * This is the actual scroll viewport.
+   */
+  overflow-y: scroll;
+  overflow-x: hidden;
+
+  padding: 7px;
+
+  border: 1px solid rgba(120, 210, 255, 0.22);
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(3, 9, 15, 0.86),
+      rgba(2, 6, 11, 0.92)
+    );
+
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.45),
+    inset 0 0 50px rgba(70, 180, 255, 0.025);
+
+  overscroll-behavior: contain;
+
+  -webkit-overflow-scrolling: touch;
+
+  touch-action: pan-y;
+
+  scrollbar-width: thin;
+  scrollbar-color:
+    rgba(130, 210, 255, 0.35)
+    transparent;
+
+  pointer-events: auto;
+}
+
+.inspector-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.inspector-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.inspector-body::-webkit-scrollbar-thumb {
+  background: rgba(130, 210, 255, 0.28);
+
+  border-radius: 3px;
+}
+
+.inspector-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(130, 210, 255, 0.45);
+}
+
+
+/* ============================================================
+   SECTIONS
+   ============================================================ */
+
+.inspector-section {
+  /*
+   * Sections grow with their contents.
+   * They do NOT scroll independently.
+   */
+  flex: 0 0 auto;
+
+  border: 1px solid rgba(140, 215, 255, 0.12);
+
+  background: rgba(255, 255, 255, 0.018);
+
+  overflow: visible;
+  max-height: none;
+}
+
+.inspector-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  min-height: 31px;
+
+  padding: 0 9px;
+
+  border-bottom: 1px solid rgba(140, 215, 255, 0.08);
+
+  font-size: 9px;
+  font-weight: 700;
+
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+
+  color: rgba(190, 230, 245, 0.62);
+}
+
+.inspector-section-content {
+  padding: 8px;
+
+  overflow: visible;
+}
+
+
+/* ============================================================
+   AGENT STATE
+   ============================================================ */
+
+.agent-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agent-state-orb {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+
+  border-radius: 50%;
+
+  background: rgba(160, 220, 255, 0.25);
+
+  box-shadow: 0 0 0 transparent;
+
+  transition:
+    background 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.agent-state-orb.active {
+  background: var(--glow, #74d7ff);
+
+  box-shadow:
+    0 0 8px var(--glow, #74d7ff),
+    0 0 20px var(--glow, #74d7ff);
+}
+
+.agent-state-name {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.agent-state-detail {
+  margin-top: 3px;
+
+  color: rgba(180, 215, 230, 0.48);
+
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
+
+/* ============================================================
+   TIMELINE
+   ============================================================ */
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+
+  max-height: none;
+  overflow: visible;
+}
+
+.timeline-row {
+  display: grid;
+
+  grid-template-columns: 14px 1fr auto;
+
+  align-items: center;
+
+  gap: 7px;
+
+  min-height: 24px;
+
+  color: rgba(205, 235, 245, 0.55);
+
+  font-size: 9px;
+  letter-spacing: 0.05em;
+}
+
+.timeline-node {
+  width: 7px;
+  height: 7px;
+
+  border: 1px solid rgba(150, 220, 255, 0.25);
+
+  border-radius: 50%;
+}
+
+.timeline-row.active {
+  color: rgba(230, 250, 255, 0.96);
+}
+
+.timeline-row.active .timeline-node {
+  background: var(--glow, #74d7ff);
+
+  border-color: var(--glow, #74d7ff);
+
+  box-shadow:
+    0 0 7px var(--glow, #74d7ff);
+}
+
+.timeline-row.complete .timeline-node {
+  background: rgba(120, 230, 170, 0.65);
+
+  border-color: rgba(120, 230, 170, 0.8);
+}
+
+.timeline-time {
+  color: rgba(180, 215, 230, 0.35);
+
+  font-variant-numeric: tabular-nums;
+}
+
+
+/* ============================================================
+   ACTIVITY
+   ============================================================ */
+
+/*
+ * NO INNER SCROLLBAR.
+ *
+ * The entire activity history expands inside .inspector-body.
+ */
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  max-height: none;
+
+  overflow: visible;
+}
+
+.activity-item {
+  display: grid;
+
+  grid-template-columns: 52px 10px 1fr;
+
+  gap: 5px;
+
+  align-items: start;
+
+  padding: 4px 0;
+
+  border-bottom: 1px solid rgba(140, 215, 255, 0.045);
+
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.activity-time {
+  color: rgba(180, 215, 230, 0.3);
+
+  font-variant-numeric: tabular-nums;
+}
+
+.activity-marker {
+  color: var(--glow, #74d7ff);
+}
+
+.activity-text {
+  color: rgba(215, 238, 246, 0.65);
+
+  word-break: break-word;
+}
+
+.activity-item.tool .activity-marker {
+  color: rgba(255, 215, 120, 0.9);
+}
+
+.activity-item.error .activity-marker {
+  color: rgba(255, 100, 100, 0.95);
+}
+
+.activity-item.system .activity-marker {
+  color: rgba(170, 190, 210, 0.7);
+}
+
+
+/* ============================================================
+   DEVICES
+   ============================================================ */
+
+.device-grid {
+  display: grid;
+
+  grid-template-columns: 1fr 1fr;
+
+  gap: 5px;
+
+  max-height: none;
+
+  overflow: visible;
+}
+
+.device-card {
+  padding: 7px;
+
+  border: 1px solid rgba(140, 215, 255, 0.08);
+
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.device-card-name {
+  font-size: 9px;
+  font-weight: 700;
+
+  letter-spacing: 0.08em;
+}
+
+.device-card-status {
+  display: flex;
+  align-items: center;
+
+  gap: 5px;
+
+  margin-top: 5px;
+
+  font-size: 8px;
+
+  color: rgba(180, 215, 230, 0.45);
+}
+
+.device-dot {
+  width: 5px;
+  height: 5px;
+
+  flex: 0 0 5px;
+
+  border-radius: 50%;
+
+  background: rgba(150, 170, 185, 0.35);
+}
+
+.device-dot.online {
+  background: rgba(120, 235, 175, 0.9);
+
+  box-shadow:
+    0 0 7px rgba(120, 235, 175, 0.65);
+}
+
+
+/* ============================================================
+   DIAGNOSTICS
+   ============================================================ */
+
+.diag-grid {
+  display: grid;
+
+  grid-template-columns: 1fr auto;
+
+  gap: 5px 12px;
+
+  font-size: 9px;
+
+  max-height: none;
+
+  overflow: visible;
+}
+
+.diag-label {
+  color: rgba(180, 215, 230, 0.4);
+}
+
+.diag-value {
+  color: rgba(220, 240, 248, 0.75);
+
+  text-align: right;
+
+  font-variant-numeric: tabular-nums;
+}
+
+.resource-bar {
+  height: 3px;
+
+  margin-top: 3px;
+
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.resource-fill {
+  width: 0;
+  height: 100%;
+
+  background: var(--glow, #74d7ff);
+
+  box-shadow:
+    0 0 8px var(--glow, #74d7ff);
+
+  transition: width 300ms ease;
+}
+
+
+/* ============================================================
+   MOBILE
+   ============================================================ */
+
+@media (max-width: 760px) {
+
+  #hudInspector {
+    /*
+     * Keep it away from the bottom chat bar.
+     */
+    top: max(
+      58px,
+      calc(env(safe-area-inset-top) + 48px)
+    );
+
+    right: 10px;
+    left: auto;
+
+    width: min(
+      310px,
+      calc(100vw - 20px)
+    );
+
+    /*
+     * Actual fixed viewport height.
+     */
+    height: calc(
+      100dvh - 130px - env(safe-area-inset-bottom)
+    );
+
+    max-height: calc(
+      100dvh - 130px - env(safe-area-inset-bottom)
+    );
+
+    z-index: 900;
+  }
+
+  .inspector-header {
+    height: 38px;
+    min-height: 38px;
+    flex: 0 0 38px;
+  }
+
+  .inspector-body {
+    /*
+     * Force the body to become a real scroll viewport.
+     */
+    height: auto;
+    max-height: none;
+    min-height: 0;
+
+    flex: 1 1 auto;
+
+    overflow-y: scroll;
+    overflow-x: hidden;
+
+    touch-action: pan-y;
+
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /*
+   * Absolutely no nested scrolling.
+   */
+  .activity-list,
+  .timeline,
+  .device-grid,
+  .diag-grid {
+    max-height: none;
+    overflow: visible;
+  }
+
+  /*
+   * Existing HUD controls remain untouched.
+   *
+   * In particular, there is NO #modeToggle rule here.
+   */
+
+  #chatPanel {
+    z-index: 1000;
+  }
+}
+
+
+/* ============================================================
+   VERY SMALL PHONES
+   ============================================================ */
+
+@media (max-width: 360px) {
+
+  #hudInspector {
+    top: max(
+      54px,
+      calc(env(safe-area-inset-top) + 44px)
+    );
+
+    right: 8px;
+
+    width: min(
+      292px,
+      calc(100vw - 16px)
+    );
+
+    height: calc(
+      100dvh - 120px - env(safe-area-inset-bottom)
+    );
+
+    max-height: calc(
+      100dvh - 120px - env(safe-area-inset-bottom)
+    );
+  }
+
+  .inspector-header {
+    height: 36px;
+    min-height: 36px;
+    flex-basis: 36px;
+  }
+}
+
+
+/* ============================================================
+   LANDSCAPE PHONES
+   ============================================================ */
+
+@media (max-width: 760px) and (orientation: landscape) {
+
+  #hudInspector {
+    top: max(
+      48px,
+      calc(env(safe-area-inset-top) + 38px)
+    );
+
+    right: 10px;
+
+    width: min(
+      340px,
+      45vw
+    );
+
+    height: calc(
+      100dvh - 90px - env(safe-area-inset-bottom)
+    );
+
+    max-height: calc(
+      100dvh - 90px - env(safe-area-inset-bottom)
+    );
+  }
+}
+
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+
+  #hudInspector,
+  .inspector-button,
+  .agent-state-orb,
+  .resource-fill {
+    transition: none;
+  }
+}
