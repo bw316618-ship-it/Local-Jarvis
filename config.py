@@ -42,6 +42,17 @@ DEFAULTS = {
     "index_chunk_size": 500,
     "index_chunk_overlap": 50,
     "index_max_file_mb": 20,
+    # NORMAL mode's tool list has grown to 65+ schemas (git, files, media,
+    # calendar, maps, desktop automation, etc. all merged into one flat
+    # list). Offering a local 4-8B model 65 candidates on every turn
+    # measurably hurts tool-selection accuracy versus offering ~20-30 --
+    # see brain/tool_relevance.py. tool_relevance_threshold: a mode's tool
+    # list is only filtered once it exceeds this size, so small modes
+    # (COMPANION, and CREATIVE/CODING today) are never affected.
+    # tool_relevance_top_k: how many relevance-ranked tools to keep beyond
+    # the always-included session-control set once filtering kicks in.
+    "tool_relevance_threshold": 30,
+    "tool_relevance_top_k": 20,
     "piper_voice_model": "voices/en_US-amy-medium.onnx",
     "ors_api_key": None,
     "hud_http_port": 8765,
