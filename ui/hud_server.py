@@ -29,6 +29,7 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
 from config import CONFIG
+from tools.diagnostics import system_status_snapshot
 from tools.map_hud import drain_map_actions
 
 STATIC_DIR = Path(__file__).resolve().parent / "hud" / "static"
@@ -40,6 +41,7 @@ WS_PORT = CONFIG["hud_ws_port"]
 CONFIRM_TIMEOUT_SECONDS = 120
 AUTH_TIMEOUT_SECONDS = 15
 PAIRING_TIMEOUT_SECONDS = 120
+SYSTEM_STATUS_INTERVAL_SECONDS = CONFIG.get("hud_system_status_interval_seconds", 5)
 
 
 def _hash_token(token: str) -> str:
@@ -626,6 +628,40 @@ class HUDBridge:
 
     # -- WebSocket -------------------------------------------------------
 
+    async def _system_status_loop(self):
+        """Broadcast a live system-status snapshot (CPU/memory/disk/uptime)
+        to every connected device every SYSTEM_STATUS_INTERVAL_SECONDS.
+
+        This is the previously-unimplemented half of the HUD's "System
+        Status" widget -- the frontend markup/CSS shell existed, but
+        nothing on the backend ever actually pushed real data into it.
+        psutil.cpu_percent(interval=0.5) blocks the calling thread for
+        0.5s to measure over a sampling window, which is why this runs on
+        a background thread via asyncio.to_thread rather than directly on
+        the event loop -- otherwise every single status tick would stall
+        the WebSocket server from handling anything else (chat messages,
+        confirmations, device auth) for half a second, every
+        SYSTEM_STATUS_INTERVAL_SECONDS.
+
+        Waits on _ws_stop_signal with a timeout instead of a flat
+        asyncio.sleep so shutdown isn't delayed by up to
+        SYSTEM_STATUS_INTERVAL_SECONDS when stop() is called.
+        """
+        while not self._ws_stop_signal.is_set():
+            try:
+                snapshot = await asyncio.to_thread(system_status_snapshot)
+                await self._broadcast_json({"type": "system_status", **snapshot})
+            except Exception as e:
+                print(f"[Jarvis HUD] System status broadcast failed: {e}")
+
+            try:
+                await asyncio.wait_for(
+                    self._ws_stop_signal.wait(),
+                    timeout=SYSTEM_STATUS_INTERVAL_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                pass  # normal -- just means it's time for the next snapshot
+
     def _run_ws_server(self):
         import websockets
 
@@ -718,12 +754,23 @@ class HUDBridge:
                 asyncio.Event()
             )
 
-            async with websockets.serve(
-                handler,
-                "0.0.0.0",
-                self.ws_port,
-            ):
-                await self._ws_stop_signal.wait()
+            status_task = asyncio.create_task(
+                self._system_status_loop()
+            )
+
+            try:
+                async with websockets.serve(
+                    handler,
+                    "0.0.0.0",
+                    self.ws_port,
+                ):
+                    await self._ws_stop_signal.wait()
+            finally:
+                status_task.cancel()
+                try:
+                    await status_task
+                except asyncio.CancelledError:
+                    pass
 
         try:
             self._loop = (
