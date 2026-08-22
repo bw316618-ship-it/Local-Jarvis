@@ -1,0 +1,568 @@
+/* ============================================================
+   JARVIS MAP EXTENSION
+   ============================================================ */
+
+#jarvisMapWidget {
+  position: fixed;
+
+  left: 22px;
+  bottom: 22px;
+
+  width: 245px;
+  height: 170px;
+
+  z-index: 700;
+
+  overflow: hidden;
+
+  border: 1px solid rgba(116, 215, 255, 0.24);
+
+  background: rgba(3, 9, 15, 0.94);
+
+  box-shadow:
+    0 10px 35px rgba(0, 0, 0, 0.42),
+    inset 0 0 30px rgba(70, 180, 255, 0.035);
+
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+
+  cursor: pointer;
+
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+#jarvisMapWidget:hover {
+  border-color:
+    rgba(116, 215, 255, 0.48);
+
+  box-shadow:
+    0 12px 42px rgba(0, 0, 0, 0.5),
+    0 0 24px rgba(70, 180, 255, 0.06);
+}
+
+
+/* ============================================================
+   MINI MAP
+   ============================================================ */
+
+#jarvisMapCanvas {
+  position: absolute;
+
+  inset: 0;
+
+  width: 100%;
+  height: 100%;
+
+  display: block;
+
+  background: #071017;
+}
+
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+
+.jarvis-map-header {
+  position: absolute;
+
+  top: 0;
+  left: 0;
+  right: 0;
+
+  height: 29px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  padding: 0 9px;
+
+  z-index: 3;
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(3, 9, 15, 0.96),
+      rgba(3, 9, 15, 0.5),
+      transparent
+    );
+
+  pointer-events: none;
+}
+
+.jarvis-map-title {
+  color:
+    rgba(215, 242, 250, 0.82);
+
+  font-size: 9px;
+
+  font-weight: 700;
+
+  letter-spacing: 0.18em;
+}
+
+.jarvis-map-status {
+  color:
+    rgba(116, 215, 255, 0.62);
+
+  font-size: 8px;
+
+  letter-spacing: 0.08em;
+}
+
+
+/* ============================================================
+   LOCATION
+   ============================================================ */
+
+.jarvis-map-location {
+  position: absolute;
+
+  left: 9px;
+  bottom: 7px;
+
+  z-index: 3;
+
+  padding: 3px 5px;
+
+  background:
+    rgba(3, 9, 15, 0.78);
+
+  border:
+    1px solid rgba(116, 215, 255, 0.12);
+
+  color:
+    rgba(205, 235, 245, 0.62);
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 7px;
+
+  letter-spacing: 0.04em;
+
+  pointer-events: none;
+}
+
+
+/* ============================================================
+   EXPANDED OVERLAY
+   ============================================================ */
+
+#jarvisMapOverlay {
+  position: fixed;
+
+  /*
+   * Leave the global chat bar visible.
+   */
+  top: 0;
+  left: 0;
+  right: 0;
+
+  bottom: 92px;
+
+  z-index: 800;
+
+  display: none;
+
+  align-items: center;
+  justify-content: center;
+
+  padding: 24px;
+
+  background:
+    rgba(1, 4, 7, 0.78);
+
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+}
+
+#jarvisMapOverlay.visible {
+  display: flex;
+}
+
+
+/* ============================================================
+   EXPANDED WINDOW
+   ============================================================ */
+
+.jarvis-map-window {
+  position: relative;
+
+  width:
+    min(1100px, calc(100vw - 48px));
+
+  height:
+    min(720px, calc(100% - 48px));
+
+  overflow: hidden;
+
+  border:
+    1px solid rgba(116, 215, 255, 0.28);
+
+  background: #050b10;
+
+  box-shadow:
+    0 20px 80px rgba(0, 0, 0, 0.65),
+    0 0 50px rgba(50, 170, 255, 0.05);
+}
+
+
+/* ============================================================
+   WINDOW HEADER
+   ============================================================ */
+
+.jarvis-map-window-header {
+  position: absolute;
+
+  top: 0;
+  left: 0;
+  right: 0;
+
+  height: 44px;
+
+  display: flex;
+
+  align-items: center;
+
+  justify-content: space-between;
+
+  padding: 0 14px;
+
+  z-index: 10;
+
+  border-bottom:
+    1px solid rgba(116, 215, 255, 0.12);
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(4, 12, 19, 0.96),
+      rgba(4, 12, 19, 0.72)
+    );
+
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.jarvis-map-window-title {
+  display: flex;
+
+  align-items: center;
+
+  gap: 9px;
+
+  color:
+    rgba(225, 248, 255, 0.9);
+
+  font-size: 10px;
+
+  font-weight: 700;
+
+  letter-spacing: 0.22em;
+}
+
+.jarvis-map-window-title::before {
+  content: "";
+
+  width: 7px;
+  height: 7px;
+
+  border-radius: 50%;
+
+  background: #74d7ff;
+
+  box-shadow:
+    0 0 8px #74d7ff,
+    0 0 18px #74d7ff;
+}
+
+.jarvis-map-close {
+  width: 29px;
+  height: 29px;
+
+  border:
+    1px solid rgba(150, 220, 255, 0.18);
+
+  background:
+    rgba(255, 255, 255, 0.025);
+
+  color:
+    rgba(225, 245, 255, 0.72);
+
+  cursor: pointer;
+
+  font-size: 15px;
+}
+
+.jarvis-map-close:hover {
+  background:
+    rgba(100, 190, 255, 0.08);
+
+  border-color:
+    rgba(150, 220, 255, 0.4);
+
+  color: white;
+}
+
+
+/* ============================================================
+   EXPANDED CANVAS
+   ============================================================ */
+
+#jarvisMapExpandedCanvas {
+  position: absolute;
+
+  left: 0;
+  right: 0;
+  bottom: 0;
+
+  top: 44px;
+
+  width: 100%;
+
+  height:
+    calc(100% - 44px);
+
+  display: block;
+
+  background: #071017;
+
+  cursor: grab;
+}
+
+#jarvisMapExpandedCanvas.dragging {
+  cursor: grabbing;
+}
+
+
+/* ============================================================
+   MAP MESSAGE
+   ============================================================ */
+
+.jarvis-map-message {
+  position: absolute;
+
+  top: 58px;
+
+  left: 50%;
+
+  transform:
+    translateX(-50%);
+
+  z-index: 11;
+
+  padding: 7px 12px;
+
+  border:
+    1px solid rgba(116, 215, 255, 0.18);
+
+  background:
+    rgba(4, 12, 19, 0.88);
+
+  color:
+    rgba(205, 235, 245, 0.7);
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 8px;
+
+  letter-spacing: 0.1em;
+}
+
+
+/* ============================================================
+   CONTROLS
+   ============================================================ */
+
+.jarvis-map-controls {
+  position: absolute;
+
+  right: 14px;
+  bottom: 14px;
+
+  z-index: 12;
+
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 5px;
+}
+
+.jarvis-map-control {
+  width: 34px;
+  height: 34px;
+
+  border:
+    1px solid rgba(150, 220, 255, 0.2);
+
+  background:
+    rgba(4, 12, 19, 0.88);
+
+  color:
+    rgba(220, 245, 255, 0.78);
+
+  cursor: pointer;
+
+  font-size: 14px;
+
+  backdrop-filter: blur(8px);
+}
+
+.jarvis-map-control:hover {
+  background:
+    rgba(50, 120, 160, 0.18);
+
+  border-color:
+    rgba(150, 220, 255, 0.42);
+
+  color: white;
+}
+
+
+/* ============================================================
+   INFO
+   ============================================================ */
+
+.jarvis-map-info {
+  position: absolute;
+
+  left: 14px;
+  bottom: 14px;
+
+  z-index: 12;
+
+  padding: 7px 9px;
+
+  border:
+    1px solid rgba(116, 215, 255, 0.14);
+
+  background:
+    rgba(4, 12, 19, 0.84);
+
+  color:
+    rgba(195, 230, 240, 0.62);
+
+  font-family:
+    "SFMono-Regular",
+    Consolas,
+    monospace;
+
+  font-size: 8px;
+
+  line-height: 1.6;
+
+  backdrop-filter: blur(8px);
+}
+
+
+/* ============================================================
+   MOBILE
+   ============================================================ */
+
+@media (max-width: 760px) {
+
+  #jarvisMapWidget {
+    left: 10px;
+
+    bottom:
+      calc(
+        96px +
+        env(safe-area-inset-bottom)
+      );
+
+    width: 170px;
+    height: 118px;
+
+    z-index: 700;
+  }
+
+
+  #jarvisMapOverlay {
+
+    /*
+     * Preserve the mobile chat input.
+     */
+    bottom:
+      calc(
+        82px +
+        env(safe-area-inset-bottom)
+      );
+
+    padding: 8px;
+  }
+
+
+  .jarvis-map-window {
+    width:
+      calc(100vw - 16px);
+
+    height:
+      calc(100% - 16px);
+  }
+
+
+  .jarvis-map-window-header {
+    height: 40px;
+  }
+
+
+  #jarvisMapExpandedCanvas {
+    top: 40px;
+
+    height:
+      calc(100% - 40px);
+  }
+
+
+  .jarvis-map-controls {
+    right: 9px;
+    bottom: 9px;
+  }
+
+
+  .jarvis-map-info {
+    left: 9px;
+    bottom: 9px;
+  }
+}
+
+
+/* ============================================================
+   LANDSCAPE MOBILE
+   ============================================================ */
+
+@media (max-width: 760px) and (orientation: landscape) {
+
+  #jarvisMapOverlay {
+    bottom: 72px;
+  }
+
+  #jarvisMapWidget {
+    bottom: 82px;
+  }
+}
+
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+
+  #jarvisMapWidget,
+  .jarvis-map-close {
+    transition: none;
+  }
+}

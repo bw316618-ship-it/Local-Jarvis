@@ -37,6 +37,7 @@ const confirmApprove = document.getElementById("confirmApprove");
 const confirmDeny = document.getElementById("confirmDeny");
 
 let socket = null;
+window.JarvisSocket = null;
 let pendingConfirmId = null;
 let replyLineEl = null;
 
@@ -706,6 +707,7 @@ function connect() {
   }
 
   socket = window.JarvisBackend.createSocket();
+  window.JarvisSocket = socket;
 
   socket.onopen = () => {
     console.log(
