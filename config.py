@@ -57,6 +57,7 @@ DEFAULTS = {
     "ors_api_key": None,
     "hud_http_port": 8765,
     "hud_ws_port": 8766,
+    "hud_system_status_interval_seconds": 5,
     "backend_ws_port": 8770,
     "device_auth_file": "data/trusted_devices.json",
 }
