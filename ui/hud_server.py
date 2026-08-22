@@ -29,6 +29,7 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
 from config import CONFIG
+from tools.map_hud import drain_map_actions
 
 STATIC_DIR = Path(__file__).resolve().parent / "hud" / "static"
 TRUST_DB = Path(__file__).resolve().parent / "jarvis_hud_devices.json"
@@ -896,7 +897,10 @@ class HUDBridge:
 
             threading.Thread(
                 target=self._handle_user_message,
-                args=(text,),
+                args=(
+                    text,
+                    data.get("map_context"),
+                ),
                 daemon=True,
             ).start()
 
@@ -1045,22 +1049,47 @@ class HUDBridge:
     def _handle_user_message(
         self,
         text,
+        map_context=None,
     ):
         with self._chat_lock:
             if self._runtime is None:
                 self._broadcast(
                     {
-                        "type": "error",
-                        "text": "Jarvis runtime is not attached.",
+                        "type": "chat_unavailable",
+                        "text": (
+                            "This HUD session isn't "
+                            "connected to a running Jarvis."
+                        ),
                     }
                 )
                 return
 
+            runtime_text = text
+
+            if isinstance(map_context, dict):
+                try:
+                    runtime_text = (
+                        f"{text}\n\n"
+                        "[HUD MAP CONTEXT]\n"
+                        f"{json.dumps(map_context)}\n"
+                        "[END HUD MAP CONTEXT]"
+                    )
+                except Exception:
+                    runtime_text = text
+
             try:
                 self._runtime.handle_message(
-                    text,
+                    runtime_text,
                     hud=self,
                 )
+
+                for action in drain_map_actions():
+                    self._broadcast(
+                        {
+                            "type": "map_action",
+                            **action,
+                        }
+                    )
 
             except Exception as e:
                 self._broadcast(
