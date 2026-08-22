@@ -567,6 +567,8 @@ chatForm.addEventListener(
         JSON.stringify({
           type: "user_message",
           text,
+          map_context:
+            window.JarvisMap?.getContext?.() || null,
         })
       );
     } else {
@@ -851,6 +853,10 @@ function connect() {
         handleError(
           data.text
         );
+        break;
+
+      case "map_action":
+        window.JarvisMap?.handleAction?.(data);
         break;
 
       default:
