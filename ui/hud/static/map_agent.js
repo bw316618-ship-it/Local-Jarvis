@@ -83,7 +83,44 @@
     }
   }
 
+  /*
+   * The old maps.js implementation can create the same
+   * #jarvisMapWidget ID using a canvas.
+   *
+   * map_agent.js needs that ID to belong to its own Leaflet
+   * container. Remove the legacy canvas implementation if it
+   * exists.
+   */
+  function removeLegacyMap() {
+    const existingWidget =
+      document.getElementById("jarvisMapWidget");
+
+    const existingCanvas =
+      document.getElementById("jarvisMapCanvas");
+
+    /*
+     * Only remove it when the existing widget contains an actual
+     * canvas. This prevents us from deleting our own Leaflet map.
+     */
+    if (
+      existingWidget &&
+      existingCanvas &&
+      existingCanvas.tagName === "CANVAS"
+    ) {
+      existingWidget.remove();
+
+      const legacyOverlay =
+        document.getElementById("jarvisMapOverlay");
+
+      if (legacyOverlay) {
+        legacyOverlay.remove();
+      }
+    }
+  }
+
   function ensureUI() {
+    removeLegacyMap();
+
     if (document.getElementById("jarvisMapWidget")) {
       return;
     }
@@ -148,7 +185,11 @@
       "×"
     );
 
-    const canvas = createElement("div", {
+    /*
+     * This MUST be a div, not a canvas.
+     * Leaflet requires a DOM element as its map container.
+     */
+    const mapContainer = createElement("div", {
       id: "jarvisMapCanvas",
       class: "jarvis-map-canvas",
     });
@@ -170,15 +211,12 @@
 
     widget.append(
       header,
-      canvas,
+      mapContainer,
       results,
       details
     );
 
-    document.body.append(
-      toggle,
-      widget
-    );
+    document.body.append(toggle, widget);
 
     toggle.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -203,7 +241,9 @@
     widget.addEventListener("click", (event) => {
       if (
         !expanded &&
-        !event.target.closest("button")
+        !event.target.closest("button") &&
+        !event.target.closest(".jarvis-map-result") &&
+        !event.target.closest(".jarvis-map-details")
       ) {
         setExpanded(true);
       }
@@ -211,6 +251,8 @@
   }
 
   function toggleVisibility() {
+    ensureUI();
+
     const widget =
       document.getElementById("jarvisMapWidget");
 
@@ -235,16 +277,8 @@
     }
   }
 
-  /*
-   * Expanding the map normally centers on the user.
-   *
-   * Marker selection/search results pass preserveView:true,
-   * which prevents the expansion process from overwriting the
-   * marker's coordinates with the user's coordinates.
-   */
   function setExpanded(value, options = {}) {
     const nextExpanded = Boolean(value);
-
     const preserveView =
       options.preserveView === true;
 
@@ -257,6 +291,8 @@
       );
 
     expanded = nextExpanded;
+
+    ensureUI();
 
     const widget =
       document.getElementById("jarvisMapWidget");
@@ -275,15 +311,17 @@
 
     if (button) {
       button.textContent =
-        expanded
-          ? "PREVIEW"
-          : "EXPAND";
+        expanded ? "PREVIEW" : "EXPAND";
     }
 
     initMap();
 
     requestAnimationFrame(() => {
-      map?.invalidateSize();
+      if (!map) {
+        return;
+      }
+
+      map.invalidateSize();
 
       if (
         expanded &&
@@ -334,25 +372,28 @@
       }
 
       if (!userMarker) {
-        userMarker = L.circleMarker(
-          [
-            latitude,
-            longitude,
-          ],
-          {
-            radius: 7,
-            className: "jarvis-user-marker",
-            weight: 2,
-            fillOpacity: 0.9,
-          }
-        ).addTo(map);
+        userMarker =
+          L.circleMarker(
+            [latitude, longitude],
+            {
+              radius: 7,
+              className:
+                "jarvis-user-marker",
+              weight: 2,
+              fillOpacity: 0.9,
+            }
+          ).addTo(map);
 
-        userMarker.bindTooltip("YOU", {
-          permanent: true,
-          direction: "top",
-          offset: [0, -8],
-          className: "jarvis-user-label",
-        });
+        userMarker.bindTooltip(
+          "YOU",
+          {
+            permanent: true,
+            direction: "top",
+            offset: [0, -8],
+            className:
+              "jarvis-user-label",
+          }
+        );
       } else {
         userMarker.setLatLng([
           latitude,
@@ -370,34 +411,29 @@
           accuracy || 20
         );
       } else {
-        accuracyCircle = L.circle(
-          [
-            latitude,
-            longitude,
-          ],
-          {
-            radius: accuracy || 20,
-            className: "jarvis-accuracy",
-          }
-        ).addTo(map);
+        accuracyCircle =
+          L.circle(
+            [latitude, longitude],
+            {
+              radius: accuracy || 20,
+              className:
+                "jarvis-accuracy",
+            }
+          ).addTo(map);
       }
 
       /*
-       * Only automatically center on the user when the map has
-       * no search results.
+       * Only center on the user when there are no search results.
        *
-       * Once places exist, location updates must NEVER move
-       * the map away from the places the user is inspecting.
+       * This prevents the location watcher from stealing the map
+       * away from a selected cafe/restaurant/etc.
        */
       if (
         !expanded &&
         markers.size === 0
       ) {
         map.setView(
-          [
-            latitude,
-            longitude,
-          ],
+          [latitude, longitude],
           PREVIEW_ZOOM
         );
       }
@@ -425,25 +461,63 @@
   }
 
   function initMap() {
-    if (
-      initialized ||
-      !window.L
-    ) {
+    if (initialized) {
       return;
     }
 
-    const canvas =
+    if (!window.L) {
+      console.error(
+        "[Jarvis Map] Leaflet is not loaded."
+      );
+
+      setStatus("MAP LIBRARY OFFLINE");
+      return;
+    }
+
+    ensureUI();
+
+    const mapContainer =
       document.getElementById(
         "jarvisMapCanvas"
       );
 
-    if (!canvas) {
+    if (!mapContainer) {
+      console.error(
+        "[Jarvis Map] Map container not found."
+      );
+
       return;
     }
 
+    /*
+     * If another implementation somehow left a canvas
+     * with this ID behind, replace it.
+     */
+    if (
+      mapContainer.tagName === "CANVAS"
+    ) {
+      const replacement =
+        document.createElement("div");
+
+      replacement.id =
+        "jarvisMapCanvas";
+
+      replacement.className =
+        "jarvis-map-canvas";
+
+      mapContainer.replaceWith(
+        replacement
+      );
+    }
+
+    const container =
+      document.getElementById(
+        "jarvisMapCanvas"
+      );
+
     initialized = true;
 
-    map = L.map(canvas, {
+    map = L.map(container, {
       zoomControl: true,
       worldCopyJump: true,
       minZoom: 2,
@@ -584,21 +658,26 @@
         ""
       ).trim();
 
+    const lat =
+      Number(marker.lat);
+
+    const lon =
+      Number(marker.lon);
+
+    const hasCoordinates =
+      Number.isFinite(lat) &&
+      Number.isFinite(lon);
+
     const osmUrl =
-      Number.isFinite(
-        Number(marker.lat)
-      ) &&
-      Number.isFinite(
-        Number(marker.lon)
-      )
+      hasCoordinates
         ? `https://www.openstreetmap.org/?mlat=${encodeURIComponent(
-            marker.lat
+            lat
           )}&mlon=${encodeURIComponent(
-            marker.lon
+            lon
           )}#map=19/${encodeURIComponent(
-            marker.lat
+            lat
           )}/${encodeURIComponent(
-            marker.lon
+            lon
           )}`
         : "";
 
@@ -704,14 +783,19 @@
             : ""
         }
 
-        <div class="jarvis-map-detail-row">
-          <span>COORDINATES</span>
-
-          <strong>
-            ${Number(marker.lat).toFixed(6)},
-            ${Number(marker.lon).toFixed(6)}
-          </strong>
-        </div>
+        ${
+          hasCoordinates
+            ? `
+              <div class="jarvis-map-detail-row">
+                <span>COORDINATES</span>
+                <strong>
+                  ${lat.toFixed(6)},
+                  ${lon.toFixed(6)}
+                </strong>
+              </div>
+            `
+            : ""
+        }
 
         <div class="jarvis-map-detail-actions">
 
@@ -720,7 +804,9 @@
               ? `
                 <a
                   class="jarvis-map-detail-action"
-                  href="${escapeHtml(website)}"
+                  href="${escapeHtml(
+                    website
+                  )}"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -735,7 +821,9 @@
               ? `
                 <a
                   class="jarvis-map-detail-action"
-                  href="${escapeHtml(osmUrl)}"
+                  href="${escapeHtml(
+                    osmUrl
+                  )}"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -765,12 +853,6 @@
       );
   }
 
-  /*
-   * Central place-selection function.
-   *
-   * Every marker click and every result-list click goes through here.
-   * This prevents the user-location recentering bug.
-   */
   function focusMarker(marker) {
     initMap();
 
@@ -778,18 +860,29 @@
       return;
     }
 
-    const lat = Number(marker.lat);
-    const lon = Number(marker.lon);
+    const lat =
+      Number(marker.lat);
+
+    const lon =
+      Number(marker.lon);
 
     if (
       !Number.isFinite(lat) ||
       !Number.isFinite(lon)
     ) {
+      console.warn(
+        "[Jarvis Map] Invalid marker coordinates:",
+        marker
+      );
+
       return;
     }
 
     /*
-     * Expand without changing the current map view.
+     * Critical:
+     *
+     * preserveView prevents setExpanded() from centering
+     * on the user's location.
      */
     setExpanded(
       true,
@@ -799,20 +892,18 @@
     );
 
     requestAnimationFrame(() => {
+      if (!map) {
+        return;
+      }
+
       map.invalidateSize();
 
       /*
-       * This is the important part:
-       *
-       * ALWAYS use the selected marker's coordinates.
-       * Never use userLocation here.
+       * Center on the ACTUAL marker coordinates.
        */
       map.setView(
         [lat, lon],
-        Math.max(
-          map.getZoom(),
-          MARKER_ZOOM
-        ),
+        MARKER_ZOOM,
         {
           animate: true,
         }
@@ -844,13 +935,15 @@
     );
 
     markers.forEach((marker) => {
-      const item = createElement(
-        "button",
-        {
-          class: "jarvis-map-result",
-          type: "button",
-        }
-      );
+      const item =
+        createElement(
+          "button",
+          {
+            class:
+              "jarvis-map-result",
+            type: "button",
+          }
+        );
 
       const distance =
         formatDistance(
@@ -860,7 +953,8 @@
       item.innerHTML = `
         <span class="jarvis-map-result-name">
           ${escapeHtml(
-            marker.name
+            marker.name ||
+            "Unknown place"
           )}
         </span>
 
@@ -888,31 +982,84 @@
       !map ||
       !markerLayer
     ) {
+      console.warn(
+        "[Jarvis Map] set_markers received before map initialization",
+        payload
+      );
+
       return;
     }
 
+    /*
+     * Support both:
+     *
+     * {
+     *   action: "set_markers",
+     *   markers: [...]
+     * }
+     *
+     * and:
+     *
+     * {
+     *   action: "set_markers",
+     *   payload: {
+     *     markers: [...]
+     *   }
+     * }
+     */
+    let data = payload || {};
+
     if (
-      payload.replace !== false
+      payload?.payload &&
+      typeof payload.payload ===
+        "object"
+    ) {
+      data = {
+        ...payload,
+        ...payload.payload,
+      };
+    }
+
+    const incomingMarkers =
+      Array.isArray(data.markers)
+        ? data.markers
+        : Array.isArray(data.places)
+          ? data.places
+          : [];
+
+    console.log(
+      "[Jarvis Map] Received markers:",
+      incomingMarkers
+    );
+
+    if (
+      data.replace !== false
     ) {
       markerLayer.clearLayers();
       markers.clear();
       closeDetails();
     }
 
-    (payload.markers || []).forEach(
+    incomingMarkers.forEach(
       (marker) => {
-        const lat = Number(
-          marker.lat
-        );
+        const lat =
+          Number(marker.lat);
 
-        const lon = Number(
-          marker.lon
-        );
+        const lon =
+          Number(marker.lon);
 
+        /*
+         * Never render a marker without valid coordinates.
+         */
         if (
           !Number.isFinite(lat) ||
           !Number.isFinite(lon)
         ) {
+          console.warn(
+            "[Jarvis Map] Skipping marker with invalid coordinates:",
+            marker
+          );
+
           return;
         }
 
@@ -930,6 +1077,44 @@
           id,
         };
 
+        /*
+         * Use a CSS/HTML marker.
+         *
+         * This avoids Leaflet's default marker-image dependency.
+         */
+        const pinIcon =
+          L.divIcon({
+            className:
+              "jarvis-place-marker-wrapper",
+
+            html: `
+              <div
+                class="jarvis-place-marker"
+                title="${escapeHtml(
+                  marker.name ||
+                  "Place"
+                )}"
+              >
+                <span></span>
+              </div>
+            `,
+
+            iconSize: [
+              24,
+              32,
+            ],
+
+            iconAnchor: [
+              12,
+              30,
+            ],
+
+            popupAnchor: [
+              0,
+              -30,
+            ],
+          });
+
         const pin =
           L.marker(
             [lat, lon],
@@ -937,23 +1122,37 @@
               title:
                 marker.name ||
                 "Place",
+
+              icon:
+                pinIcon,
+
+              keyboard:
+                true,
+
+              zIndexOffset:
+                1000,
             }
           )
             .bindPopup(
-              popupHtml(normalized)
+              popupHtml(
+                normalized
+              )
             )
-            .addTo(markerLayer);
+            .addTo(
+              markerLayer
+            );
 
+        /*
+         * Marker click.
+         *
+         * Do NOT use the user's location here.
+         */
         pin.on(
           "click",
           (event) => {
-            /*
-             * Marker clicks use the exact same
-             * selection path as search results.
-             */
-            L.DomEvent.stopPropagation(
-              event
-            );
+            event
+              ?.originalEvent
+              ?.stopPropagation?.();
 
             focusMarker({
               ...normalized,
@@ -975,7 +1174,7 @@
     renderResults();
 
     /*
-     * Expand while preserving the current map.
+     * Expand without recentering on the user.
      */
     setExpanded(
       true,
@@ -985,26 +1184,30 @@
     );
 
     requestAnimationFrame(() => {
-      map.invalidateSize();
-
-      if (!markers.size) {
+      if (!map || !markers.size) {
         return;
       }
 
+      map.invalidateSize();
+
+      /*
+       * Fit the returned search results.
+       *
+       * User location is included only to provide context;
+       * it does not overwrite the marker positions.
+       */
       const bounds =
         L.latLngBounds(
           Array.from(
             markers.values()
-          ).map((marker) => [
-            marker.lat,
-            marker.lon,
-          ])
+          ).map(
+            (marker) => [
+              marker.lat,
+              marker.lon,
+            ]
+          )
         );
 
-      /*
-       * Include the user only when fitting the overall
-       * search results. This does NOT affect marker selection.
-       */
       if (userLocation) {
         bounds.extend([
           userLocation.lat,
@@ -1022,9 +1225,7 @@
     });
   }
 
-  function clearMarkers(
-    category = ""
-  ) {
+  function clearMarkers(category = "") {
     if (!markerLayer) {
       return;
     }
@@ -1039,6 +1240,7 @@
       markers.clear();
       closeDetails();
       renderResults();
+
       return;
     }
 
@@ -1046,7 +1248,8 @@
       (marker) => {
         if (
           String(
-            marker.category || ""
+            marker.category ||
+            ""
           ).toLowerCase() ===
           wanted
         ) {
@@ -1075,16 +1278,18 @@
       "set_markers"
     ) {
       setMarkers(payload);
+    }
 
-    } else if (
+    else if (
       payload.action ===
       "clear_markers"
     ) {
       clearMarkers(
         payload.category
       );
+    }
 
-    } else if (
+    else if (
       payload.action ===
       "focus_marker"
     ) {
@@ -1200,6 +1405,74 @@
     return context;
   }
 
+  function centerOnUser() {
+    if (!map || !userLocation) {
+      return;
+    }
+
+    map.setView(
+      [
+        userLocation.lat,
+        userLocation.lon,
+      ],
+      Math.max(
+        map.getZoom(),
+        PREVIEW_ZOOM
+      ),
+      {
+        animate: true,
+      }
+    );
+  }
+
+  function showWorld() {
+    if (!map) {
+      initMap();
+    }
+
+    if (!map) {
+      return;
+    }
+
+    map.setView(
+      DEFAULT_CENTER,
+      DEFAULT_ZOOM,
+      {
+        animate: true,
+      }
+    );
+  }
+
+  function zoomMap(direction) {
+    if (!map) {
+      initMap();
+    }
+
+    if (!map) {
+      return;
+    }
+
+    const current =
+      map.getZoom();
+
+    const next =
+      Math.max(
+        2,
+        Math.min(
+          19,
+          current +
+            Number(direction || 0)
+        )
+      );
+
+    map.setZoom(
+      next,
+      {
+        animate: true,
+      }
+    );
+  }
+
   window.JarvisMap = {
     toggle:
       toggleVisibility,
@@ -1207,13 +1480,14 @@
     open() {
       ensureUI();
 
-      document
-        .getElementById(
+      const widget =
+        document.getElementById(
           "jarvisMapWidget"
-        )
-        ?.classList.add(
-          "map-visible"
         );
+
+      widget?.classList.add(
+        "map-visible"
+      );
 
       localStorage.setItem(
         STORAGE_KEY,
@@ -1221,16 +1495,21 @@
       );
 
       initMap();
+
+      requestAnimationFrame(() => {
+        map?.invalidateSize();
+      });
     },
 
     close() {
-      document
-        .getElementById(
+      const widget =
+        document.getElementById(
           "jarvisMapWidget"
-        )
-        ?.classList.remove(
-          "map-visible"
         );
+
+      widget?.classList.remove(
+        "map-visible"
+      );
 
       localStorage.setItem(
         STORAGE_KEY,
@@ -1238,11 +1517,20 @@
       );
     },
 
-    expand: () =>
-      setExpanded(true),
+    expand() {
+      setExpanded(true);
+    },
 
-    collapse: () =>
-      setExpanded(false),
+    collapse() {
+      setExpanded(false);
+    },
+
+    centerOnUser,
+
+    showWorld,
+
+    zoom:
+      zoomMap,
 
     getContext,
 
