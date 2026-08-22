@@ -21,6 +21,7 @@ from brain.mode_config import (
     CODING,
     get_mode_config,
 )
+from brain.tool_relevance import filter_tools_by_relevance
 from config import CONFIG, get_model_for_mode
 
 
@@ -468,6 +469,20 @@ class JarvisLLM:
         )
 
         active_tools = self._tool_schemas_for_mode(mode)
+
+        if not is_trivial:
+            # Only actually narrows anything once a mode's tool count
+            # exceeds tool_relevance_threshold (currently only NORMAL, at
+            # 65+ tools) -- see brain/tool_relevance.py's module docstring
+            # for why offering all of them every turn is a real problem,
+            # not a hypothetical one.
+            active_tools = filter_tools_by_relevance(
+                user_message,
+                active_tools,
+                query_embedding=query_embedding,
+                top_k=CONFIG.get("tool_relevance_top_k", 20),
+                threshold_count=CONFIG.get("tool_relevance_threshold", 30),
+            )
 
         messages = [{"role": "system", "content": active_prompt}]
         messages.extend(self.short_term)
