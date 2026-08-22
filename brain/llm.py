@@ -22,7 +22,12 @@ from brain.mode_config import (
     get_mode_config,
 )
 from brain.tool_relevance import filter_tools_by_relevance
-from config import CONFIG, get_model_for_mode
+from brain.fast_router import (
+    classify,
+    get_instant_response,
+    looks_multi_step,
+)
+from config import CONFIG, get_model_for_mode, get_chat_options
 
 
 MAX_TOOL_ROUNDS = CONFIG["max_tool_rounds"]
@@ -34,7 +39,7 @@ _TOOL_EXECUTOR = ThreadPoolExecutor(
     thread_name_prefix="tool-call",
 )
 
-_CHAT_OPTIONS = {"num_ctx": CONFIG["num_ctx"]}
+_CHAT_OPTIONS = get_chat_options()
 
 _MULTI_STEP_HINTS = (
     " and then",
@@ -46,7 +51,43 @@ _MULTI_STEP_HINTS = (
     " finally ",
 )
 
+_SIMPLE_CONVERSATION_PREFIXES = (
+    "what can you do",
+    "what do you do",
+    "who are you",
+    "what are you",
+    "tell me about yourself",
+    "what is your purpose",
+    "how are you",
+    "what can you help with",
+    "what are my projects",
+    "what projects do i have",
+)
+
 _CREATIVE_DOCUMENT_EXTENSIONS = (".pdf", ".txt", ".md")
+
+
+def _is_simple_conversation(message: str) -> bool:
+    text = (
+        message or ""
+    ).strip().lower()
+
+    if not text:
+        return True
+
+    normalized = (
+        text
+        .replace("'", "")
+        .replace("’", "")
+    )
+
+    return any(
+        normalized == prefix
+        or normalized.startswith(
+            prefix + " "
+        )
+        for prefix in _SIMPLE_CONVERSATION_PREFIXES
+    )
 
 
 def _is_trivial_conversation(message: str) -> bool:
@@ -405,6 +446,33 @@ class JarvisLLM:
         mode = self._active_mode()
         mode_config = self._active_config()
 
+        # ---------------------------------------------------------------
+        # FAST PATH
+        # ---------------------------------------------------------------
+        #
+        # Never perform embedding, memory retrieval, tool filtering or
+        # LLM inference for deterministic conversational responses.
+        #
+        instant = get_instant_response(user_message)
+
+        if instant is not None:
+            self._update_short_term(user_message, instant)
+            remember_turn(user_message, instant)
+
+            if on_token:
+                on_token(instant)
+
+            if on_sentence:
+                on_sentence(instant)
+
+            return instant
+
+        route = classify(user_message)
+
+        # Empty input should never reach the LLM.
+        if route.name == "empty":
+            return ""
+
         # Resolve per-mode model for this turn (e.g. a coding-specialized
         # model for CODING mode via CONFIG["mode_models"]) -- see
         # config.get_model_for_mode's docstring for precedence rules.
@@ -437,37 +505,66 @@ class JarvisLLM:
             past_context = "Use the recent conversation above as the primary context."
             facts_context = "No additional facts required."
         else:
-            try:
-                query_embedding = get_embedder().encode(user_message).tolist()
-            except Exception:
-                query_embedding = None
+            # -----------------------------------------------------------
+            # Retrieval only happens when it can materially help.
+            #
+            # Fast commands such as map/system/search operations should
+            # not pay the embedding + vector lookup cost before the tool
+            # itself is called.
+            # -----------------------------------------------------------
 
-            if mode == CREATIVE:
-                # Route through the same scoped lookup the model's own
-                # get_creative_context/build_scene_context tool calls use,
-                # rather than JarvisMemory's generic unscoped search --
-                # otherwise this baseline "context" block would silently
-                # pull chunks from every project plus ingest.py's general
-                # knowledge base instead of respecting the active
-                # document/project boundary CREATIVE_PROMPT promises the
-                # model is in effect.
-                context = get_creative_context(user_message, k=8, query_embedding=query_embedding)
+            route = classify(user_message)
+
+            skip_retrieval = route.name in {
+                "maps",
+                "system",
+                "search",
+                "time",
+                "date",
+            }
+
+            if skip_retrieval:
+                query_embedding = None
+                context = "No memory retrieval required for this request."
+                past_context = "No historical conversation retrieval required."
+                facts_context = "No remembered facts required."
+
             else:
-                # project="" restricts this to documents that were never
-                # tagged with a creative project (i.e. ingest.py's general
-                # knowledge base) -- without this, anything ingested into a
-                # creative project would resurface in ordinary NORMAL-mode
-                # conversations that have nothing to do with that project.
-                context_chunks = self.memory.search(
-                    user_message,
-                    query_embedding=query_embedding,
-                    project="",
-                )
-                context = (
-                    "\n\n".join(context_chunks)
-                    if context_chunks
-                    else "No relevant information was found in local memory."
-                )
+                try:
+                    query_embedding = (
+                        get_embedder()
+                        .encode(user_message)
+                        .tolist()
+                    )
+                except Exception:
+                    query_embedding = None
+
+                if mode == CREATIVE:
+                    # Route through the same scoped lookup the model's own
+                    # get_creative_context/build_scene_context tool calls use,
+                    # rather than JarvisMemory's generic unscoped search --
+                    # otherwise this baseline "context" block would silently
+                    # pull chunks from every project plus ingest.py's general
+                    # knowledge base instead of respecting the active
+                    # document/project boundary CREATIVE_PROMPT promises the
+                    # model is in effect.
+                    context = get_creative_context(user_message, k=8, query_embedding=query_embedding)
+                else:
+                    # project="" restricts this to documents that were never
+                    # tagged with a creative project (i.e. ingest.py's general
+                    # knowledge base) -- without this, anything ingested into a
+                    # creative project would resurface in ordinary NORMAL-mode
+                    # conversations that have nothing to do with that project.
+                    context_chunks = self.memory.search(
+                        user_message,
+                        query_embedding=query_embedding,
+                        project="",
+                    )
+                    context = (
+                        "\n\n".join(context_chunks)
+                        if context_chunks
+                        else "No relevant information was found in local memory."
+                    )
 
             past_turns = recall(
                 user_message,
@@ -554,7 +651,15 @@ class JarvisLLM:
                 }
             )
 
-        if mode_config["planning"] and _looks_like_multi_step(user_message):
+        if (
+            mode_config["planning"]
+            and not _is_simple_conversation(
+                user_message
+            )
+            and looks_multi_step(
+                user_message
+            )
+        ):
             emit(
                 "On it -- this looks like it needs a few steps, "
                 "sketching a plan first."
