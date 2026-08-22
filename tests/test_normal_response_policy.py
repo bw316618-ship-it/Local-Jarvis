@@ -73,4 +73,8 @@ def test_normal_system_prompt_forbids_meta_responses():
 
     assert "Do not describe your internal reasoning" in prompt
     assert "the user has greeted" in prompt
-    assert "Answer simple conversational messages simply" in prompt
+    # Wording was reworded in the J.A.R.V.I.S. persona rewrite (was
+    # "Answer simple conversational messages simply") -- same policy,
+    # matching the current phrasing rather than the old literal string.
+    assert "A greeting deserves a natural greeting" in prompt
+    assert "Do not invoke tools merely because they are available" in prompt
