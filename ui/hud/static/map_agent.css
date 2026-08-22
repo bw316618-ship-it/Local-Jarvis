@@ -6,67 +6,933 @@
   position: fixed;
   left: 22px;
   bottom: 22px;
+
   z-index: 1100;
+
   min-width: 72px;
   height: 34px;
+
   padding: 0 12px;
-  border: 1px solid rgba(116, 215, 255, 0.28);
-  background: rgba(3, 10, 16, 0.88);
-  color: rgba(210, 244, 255, 0.82);
-  font: 700 9px/1 "Segoe UI", Arial, sans-serif;
+
+  border: 1px solid rgba(
+    116,
+    215,
+    255,
+    0.28
+  );
+
+  background: rgba(
+    3,
+    10,
+    16,
+    0.88
+  );
+
+  color: rgba(
+    210,
+    244,
+    255,
+    0.82
+  );
+
+  font:
+    700 9px/1
+    "Segoe UI",
+    Arial,
+    sans-serif;
+
   letter-spacing: 0.18em;
+
   cursor: pointer;
+
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.35), inset 0 0 18px rgba(70, 180, 255, 0.035);
+
+  box-shadow:
+    0 8px 25px rgba(
+      0,
+      0,
+      0,
+      0.35
+    ),
+    inset 0 0 18px rgba(
+      70,
+      180,
+      255,
+      0.035
+    );
 }
 
-#jarvisMapToggle:hover { border-color: rgba(116, 215, 255, 0.55); color: #fff; }
+#jarvisMapToggle:hover {
+  border-color: rgba(
+    116,
+    215,
+    255,
+    0.55
+  );
+
+  color: #fff;
+}
 
 #jarvisMapWidget {
   position: fixed;
+
   left: 22px;
   bottom: 66px;
+
   z-index: 940;
-  width: min(340px, calc(100vw - 44px));
+
+  width:
+    min(
+      340px,
+      calc(100vw - 44px)
+    );
+
   height: 220px;
+
   display: none;
+
   flex-direction: column;
-  border: 1px solid rgba(116, 215, 255, 0.25);
-  background: rgba(2, 8, 13, 0.94);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55), inset 0 0 40px rgba(70, 180, 255, 0.035);
+
+  border: 1px solid rgba(
+    116,
+    215,
+    255,
+    0.25
+  );
+
+  background: rgba(
+    2,
+    8,
+    13,
+    0.94
+  );
+
+  box-shadow:
+    0 20px 60px rgba(
+      0,
+      0,
+      0,
+      0.55
+    ),
+    inset 0 0 40px rgba(
+      70,
+      180,
+      255,
+      0.035
+    );
+
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+
   overflow: hidden;
 }
 
-#jarvisMapWidget.map-visible { display: flex; }
-#jarvisMapWidget.map-expanded { left: 20px; right: 20px; top: 20px; bottom: 92px; width: auto; height: auto; z-index: 940; }
-.jarvis-map-header { height: 38px; flex: 0 0 38px; display: flex; align-items: center; gap: 10px; padding: 0 9px; border-bottom: 1px solid rgba(116, 215, 255, 0.12); background: rgba(5, 14, 21, 0.94); }
-.jarvis-map-title { font: 700 9px/1 "Segoe UI", Arial, sans-serif; letter-spacing: 0.18em; white-space: nowrap; }
-.jarvis-map-status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: rgba(180, 215, 230, 0.42); font: 8px/1 "Segoe UI", Arial, sans-serif; letter-spacing: 0.06em; }
-.jarvis-map-controls { display: flex; gap: 4px; }
-.jarvis-map-button { width: 48px; height: 24px; padding: 0; border: 1px solid rgba(150, 220, 255, 0.16); background: rgba(255, 255, 255, 0.025); color: rgba(220, 245, 255, 0.7); font: 700 8px/1 "Segoe UI", Arial, sans-serif; cursor: pointer; }
-.jarvis-map-button:hover { border-color: rgba(150, 220, 255, 0.4); color: #fff; }
-.jarvis-map-canvas { position: relative; flex: 1; min-height: 0; width: 100%; background: #050b10; }
-.jarvis-map-results { display: none; }
-.jarvis-map-results.has-results { display: flex; flex-direction: column; gap: 3px; position: absolute; left: 30px; top: 48px; width: min(280px, calc(100% - 60px)); max-height: calc(100% - 70px); overflow-y: auto; z-index: 500; padding: 5px; border: 1px solid rgba(116, 215, 255, 0.14); background: rgba(2, 8, 13, 0.84); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-.jarvis-map-result { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; min-height: 28px; padding: 5px 7px; border: 1px solid transparent; background: rgba(255, 255, 255, 0.018); color: rgba(220, 242, 250, 0.72); text-align: left; cursor: pointer; }
-.jarvis-map-result:hover, .jarvis-map-result.selected { border-color: rgba(116, 215, 255, 0.24); background: rgba(116, 215, 255, 0.06); }
-.jarvis-map-result-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 9px/1.2 "Segoe UI", Arial, sans-serif; }
-.jarvis-map-result-distance { flex: 0 0 auto; color: rgba(180, 215, 230, 0.4); font: 8px/1 "Segoe UI", Arial, sans-serif; }
-.jarvis-map-popup { min-width: 160px; color: #10202a; font: 11px/1.45 "Segoe UI", Arial, sans-serif; }
-.jarvis-user-marker { stroke: rgba(116, 215, 255, 0.95); fill: rgba(116, 215, 255, 0.85); }
-.jarvis-accuracy { stroke: rgba(116, 215, 255, 0.2); fill: rgba(116, 215, 255, 0.05); }
-.jarvis-user-label { border: 1px solid rgba(116, 215, 255, 0.3) !important; background: rgba(3, 12, 18, 0.88) !important; color: rgba(210, 244, 255, 0.9) !important; font: 700 8px/1 "Segoe UI", Arial, sans-serif !important; letter-spacing: 0.12em; }
-#jarvisMapWidget .leaflet-control-zoom a { background: rgba(3, 10, 16, 0.86); color: rgba(220, 245, 255, 0.75); border-color: rgba(116, 215, 255, 0.15); }
-#jarvisMapWidget .leaflet-control-attribution { background: rgba(2, 8, 13, 0.7); color: rgba(220, 240, 248, 0.45); font-size: 8px; }
-#jarvisMapWidget .leaflet-control-attribution a { color: rgba(180, 225, 245, 0.6); }
+#jarvisMapWidget.map-visible {
+  display: flex;
+}
+
+/* ============================================================
+   EXPANDED MAP
+   ============================================================ */
+
+#jarvisMapWidget.map-expanded {
+  left: 20px;
+  right: 20px;
+  top: 20px;
+  bottom: 92px;
+
+  width: auto;
+  height: auto;
+
+  z-index: 940;
+}
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+
+.jarvis-map-header {
+  height: 38px;
+  flex: 0 0 38px;
+
+  display: flex;
+  align-items: center;
+
+  gap: 10px;
+
+  padding: 0 9px;
+
+  border-bottom: 1px solid rgba(
+    116,
+    215,
+    255,
+    0.12
+  );
+
+  background: rgba(
+    5,
+    14,
+    21,
+    0.94
+  );
+
+  position: relative;
+  z-index: 20;
+}
+
+.jarvis-map-title {
+  font:
+    700 9px/1
+    "Segoe UI",
+    Arial,
+    sans-serif;
+
+  letter-spacing: 0.18em;
+
+  white-space: nowrap;
+}
+
+.jarvis-map-status {
+  flex: 1;
+  min-width: 0;
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  color: rgba(
+    180,
+    215,
+    230,
+    0.42
+  );
+
+  font:
+    8px/1
+    "Segoe UI",
+    Arial,
+    sans-serif;
+
+  letter-spacing: 0.06em;
+}
+
+.jarvis-map-controls {
+  display: flex;
+  gap: 4px;
+}
+
+.jarvis-map-button {
+  width: 48px;
+  height: 24px;
+
+  padding: 0;
+
+  border: 1px solid rgba(
+    150,
+    220,
+    255,
+    0.16
+  );
+
+  background: rgba(
+    255,
+    255,
+    255,
+    0.025
+  );
+
+  color: rgba(
+    220,
+    245,
+    255,
+    0.7
+  );
+
+  font:
+    700 8px/1
+    "Segoe UI",
+    Arial,
+    sans-serif;
+
+  cursor: pointer;
+}
+
+.jarvis-map-button:hover {
+  border-color: rgba(
+    150,
+    220,
+    255,
+    0.4
+  );
+
+  color: #fff;
+}
+
+/* ============================================================
+   MAP
+   ============================================================ */
+
+.jarvis-map-canvas {
+  position: relative;
+
+  flex: 1;
+  min-height: 0;
+
+  width: 100%;
+
+  background: #050b10;
+}
+
+/* ============================================================
+   SEARCH RESULTS
+   ============================================================ */
+
+.jarvis-map-results {
+  display: none;
+}
+
+.jarvis-map-results.has-results {
+  display: flex;
+
+  flex-direction: column;
+
+  gap: 3px;
+
+  position: absolute;
+
+  left: 30px;
+  top: 48px;
+
+  width:
+    min(
+      280px,
+      calc(100% - 60px)
+    );
+
+  max-height:
+    calc(100% - 70px);
+
+  overflow-y: auto;
+
+  z-index: 500;
+
+  padding: 5px;
+
+  border: 1px solid rgba(
+    116,
+    215,
+    255,
+    0.14
+  );
+
+  background: rgba(
+    2,
+    8,
+    13,
+    0.84
+  );
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.jarvis-map-result {
+  display: flex;
+
+  align-items: center;
+  justify-content: space-between;
+
+  gap: 10px;
+
+  width: 100%;
+  min-height: 28px;
+
+  padding: 5px 7px;
+
+  border: 1px solid transparent;
+
+  background: rgba(
+    255,
+    255,
+    255,
+    0.018
+  );
+
+  color: rgba(
+    220,
+    242,
+    250,
+    0.72
+  );
+
+  text-align: left;
+
+  cursor: pointer;
+}
+
+.jarvis-map-result:hover,
+.jarvis-map-result.selected {
+  border-color: rgba(
+    116,
+    215,
+    255,
+    0.24
+  );
+
+  background: rgba(
+    116,
+    215,
+    255,
+    0.06
+  );
+}
+
+.jarvis-map-result-name {
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
+  font:
+    600 9px/1.2
+    "Segoe UI",
+    Arial,
+    sans-serif;
+}
+
+.jarvis-map-result-distance {
+  flex: 0 0 auto;
+
+  color: rgba(
+    180,
+    215,
+    230,
+    0.4
+  );
+
+  font:
+    8px/1
+    "Segoe UI",
+    Arial,
+    sans-serif;
+}
+
+/* ============================================================
+   POPUP
+   ============================================================ */
+
+.jarvis-map-popup {
+  min-width: 160px;
+
+  color: #10202a;
+
+  font:
+    11px/1.45
+    "Segoe UI",
+    Arial,
+    sans-serif;
+}
+
+/* ============================================================
+   USER LOCATION
+   ============================================================ */
+
+.jarvis-user-marker {
+  stroke: rgba(
+    116,
+    215,
+    255,
+    0.95
+  );
+
+  fill: rgba(
+    116,
+    215,
+    255,
+    0.85
+  );
+}
+
+.jarvis-accuracy {
+  stroke: rgba(
+    116,
+    215,
+    255,
+    0.2
+  );
+
+  fill: rgba(
+    116,
+    215,
+    255,
+    0.05
+  );
+}
+
+.jarvis-user-label {
+  border: 1px solid rgba(
+    116,
+    215,
+    255,
+    0.3
+  ) !important;
+
+  background: rgba(
+    3,
+    12,
+    18,
+    0.88
+  ) !important;
+
+  color: rgba(
+    210,
+    244,
+    255,
+    0.9
+  ) !important;
+
+  font:
+    700 8px/1
+    "Segoe UI",
+    Arial,
+    sans-serif !important;
+
+  letter-spacing: 0.12em;
+}
+
+/* ============================================================
+   LEAFLET CONTROLS
+   ============================================================ */
+
+#jarvisMapWidget
+  .leaflet-control-zoom a {
+  background: rgba(
+    3,
+    10,
+    16,
+    0.86
+  );
+
+  color: rgba(
+    220,
+    245,
+    255,
+    0.75
+  );
+
+  border-color: rgba(
+    116,
+    215,
+    255,
+    0.15
+  );
+}
+
+#jarvisMapWidget
+  .leaflet-control-attribution {
+  background: rgba(
+    2,
+    8,
+    13,
+    0.7
+  );
+
+  color: rgba(
+    220,
+    240,
+    248,
+    0.45
+  );
+
+  font-size: 8px;
+}
+
+#jarvisMapWidget
+  .leaflet-control-attribution a {
+  color: rgba(
+    180,
+    225,
+    245,
+    0.6
+  );
+}
+
+/* ============================================================
+   LOCATION DETAIL PANEL
+   ============================================================ */
+
+.jarvis-map-details {
+  position: absolute;
+
+  top: 48px;
+  right: 12px;
+
+  width:
+    min(
+      360px,
+      calc(100% - 24px)
+    );
+
+  max-height:
+    calc(100% - 60px);
+
+  overflow-y: auto;
+
+  z-index: 700;
+
+  border: 1px solid rgba(
+    116,
+    215,
+    255,
+    0.22
+  );
+
+  background: rgba(
+    2,
+    8,
+    13,
+    0.94
+  );
+
+  color: rgba(
+    220,
+    242,
+    250,
+    0.78
+  );
+
+  box-shadow:
+    0 18px 50px rgba(
+      0,
+      0,
+      0,
+      0.55
+    ),
+    inset 0 0 30px rgba(
+      70,
+      180,
+      255,
+      0.03
+    );
+
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.jarvis-map-details[hidden] {
+  display: none;
+}
+
+.jarvis-map-details-header {
+  display: flex;
+
+  align-items: flex-start;
+  justify-content: space-between;
+
+  gap: 12px;
+
+  padding: 11px 12px;
+
+  border-bottom: 1px solid rgba(
+    116,
+    215,
+    255,
+    0.12
+  );
+
+  background: rgba(
+    5,
+    14,
+    21,
+    0.96
+  );
+}
+
+.jarvis-map-details-kicker {
+  margin-bottom: 5px;
+
+  color: rgba(
+    180,
+    215,
+    230,
+    0.4
+  );
+
+  font:
+    700 8px/1
+    "Segoe UI",
+    Arial,
+    sans-serif;
+
+  letter-spacing: 0.18em;
+}
+
+.jarvis-map-details-title {
+  color: rgba(
+    235,
+    250,
+    255,
+    0.96
+  );
+
+  font:
+    700 15px/1.2
+    "Segoe UI",
+    Arial,
+    sans-serif;
+}
+
+.jarvis-map-details-close {
+  width: 27px;
+  height: 27px;
+
+  flex: 0 0 27px;
+
+  padding: 0;
+
+  border: 1px solid rgba(
+    150,
+    220,
+    255,
+    0.16
+  );
+
+  background: rgba(
+    255,
+    255,
+    255,
+    0.025
+  );
+
+  color: rgba(
+    220,
+    245,
+    255,
+    0.7
+  );
+
+  cursor: pointer;
+}
+
+.jarvis-map-details-close:hover {
+  border-color: rgba(
+    150,
+    220,
+    255,
+    0.4
+  );
+
+  color: #fff;
+}
+
+.jarvis-map-details-body {
+  padding: 9px 12px 12px;
+}
+
+.jarvis-map-detail-row {
+  display: grid;
+
+  grid-template-columns:
+    90px 1fr;
+
+  gap: 10px;
+
+  padding: 8px 0;
+
+  border-bottom: 1px solid rgba(
+    140,
+    215,
+    255,
+    0.06
+  );
+
+  font:
+    9px/1.35
+    "Segoe UI",
+    Arial,
+    sans-serif;
+}
+
+.jarvis-map-detail-row.stacked {
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+
+.jarvis-map-detail-row > span {
+  color: rgba(
+    180,
+    215,
+    230,
+    0.38
+  );
+
+  font-weight: 700;
+
+  letter-spacing: 0.12em;
+}
+
+.jarvis-map-detail-row > strong {
+  color: rgba(
+    220,
+    242,
+    250,
+    0.76
+  );
+
+  font-weight: 600;
+
+  word-break: break-word;
+}
+
+.jarvis-map-detail-actions {
+  display: flex;
+
+  flex-wrap: wrap;
+
+  gap: 5px;
+
+  padding-top: 10px;
+}
+
+.jarvis-map-detail-action {
+  display: inline-flex;
+
+  align-items: center;
+
+  min-height: 27px;
+
+  padding: 0 9px;
+
+  border: 1px solid rgba(
+    116,
+    215,
+    255,
+    0.2
+  );
+
+  background: rgba(
+    116,
+    215,
+    255,
+    0.035
+  );
+
+  color: rgba(
+    210,
+    244,
+    255,
+    0.72
+  );
+
+  text-decoration: none;
+
+  font:
+    700 8px/1
+    "Segoe UI",
+    Arial,
+    sans-serif;
+
+  letter-spacing: 0.1em;
+}
+
+.jarvis-map-detail-action:hover {
+  border-color: rgba(
+    116,
+    215,
+    255,
+    0.45
+  );
+
+  color: #fff;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
 
 @media (max-width: 760px) {
-  #jarvisMapToggle { left: 10px; bottom: calc(78px + env(safe-area-inset-bottom)); }
-  #jarvisMapWidget { left: 10px; bottom: calc(118px + env(safe-area-inset-bottom)); width: min(310px, calc(100vw - 20px)); height: 190px; }
-  #jarvisMapWidget.map-expanded { left: 8px; right: 8px; top: max(8px, env(safe-area-inset-top)); bottom: calc(86px + env(safe-area-inset-bottom)); }
-  .jarvis-map-results.has-results { left: 12px; top: 48px; width: min(260px, calc(100% - 24px)); }
+
+  #jarvisMapToggle {
+    left: 10px;
+
+    bottom:
+      calc(
+        78px +
+        env(safe-area-inset-bottom)
+      );
+  }
+
+  #jarvisMapWidget {
+    left: 10px;
+
+    bottom:
+      calc(
+        118px +
+        env(safe-area-inset-bottom)
+      );
+
+    width:
+      min(
+        310px,
+        calc(100vw - 20px)
+      );
+
+    height: 190px;
+  }
+
+  #jarvisMapWidget.map-expanded {
+    left: 8px;
+    right: 8px;
+
+    top:
+      max(
+        8px,
+        env(safe-area-inset-top)
+      );
+
+    bottom:
+      calc(
+        86px +
+        env(safe-area-inset-bottom)
+      );
+  }
+
+  .jarvis-map-results.has-results {
+    left: 12px;
+    top: 48px;
+
+    width:
+      min(
+        260px,
+        calc(100% - 24px)
+      );
+  }
+
+  .jarvis-map-details {
+    left: 12px;
+    right: 12px;
+
+    top: 48px;
+
+    width: auto;
+
+    max-height:
+      calc(100% - 60px);
+  }
 }
-@media (max-width: 360px) { #jarvisMapToggle { left: 8px; } #jarvisMapWidget { left: 8px; width: calc(100vw - 16px); } }
+
+@media (max-width: 360px) {
+
+  #jarvisMapToggle {
+    left: 8px;
+  }
+
+  #jarvisMapWidget {
+    left: 8px;
+
+    width:
+      calc(100vw - 16px);
+  }
+}
