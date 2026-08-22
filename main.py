@@ -112,6 +112,48 @@ def _handle_possible_session_end() -> bool:
     return True
 
 
+def _switch_mode(new_mode: str) -> str | None:
+    """Switch session mode, returning a notice string if leaving CREATIVE
+    mode with an active document/project, or None otherwise.
+
+    The scope itself isn't lost -- voice/document_state.py's active
+    document/project persists independently of session mode and resumes
+    automatically via /creative or whenever the model re-enters creative
+    mode -- but silently switching away without any acknowledgment was a
+    real gap. Originally only /talk warned about this; going straight
+    from /creative to /coding (or the reverse) gave zero indication
+    anything was being left behind. Every mode-switching command routes
+    through this helper now, so the notice is consistent regardless of
+    which command triggered the switch.
+
+    CODING mode deliberately isn't covered by this -- it has no
+    persistent state of its own (git_tools.py takes repo_path per call,
+    nothing is "active" between turns), so there's nothing to warn about
+    when leaving it.
+    """
+    from voice import document_state
+
+    current = session_state.current_mode()
+    project = document_state.get_active_project()
+    document = document_state.get_active_document()
+    leaving_creative_scope = (
+        current == session_state.CREATIVE
+        and new_mode != session_state.CREATIVE
+        and (project or document)
+    )
+
+    notice = None
+    if leaving_creative_scope:
+        scope_desc = f"project {project!r}" if project else "the active document"
+        notice = (
+            f"Leaving creative mode -- {scope_desc} is still selected "
+            "and will resume if you go back with /creative."
+        )
+
+    session_state.set_mode(new_mode)
+    return notice
+
+
 def _print_mode() -> None:
     mode = session_state.current_mode()
 
@@ -363,27 +405,19 @@ def main():
             continue
 
         if lowered == "/talk":
-            from voice import document_state
-
             if session_state.current_mode() == session_state.COMPANION:
-                session_state.set_mode(session_state.NORMAL)
+                _switch_mode(session_state.NORMAL)
                 console.print(
                     "[dim]Companion mode off -- back to normal, "
                     "full tool access.[/dim]\n"
                 )
             else:
-                leaving_creative = session_state.current_mode() == session_state.CREATIVE
-                active_project = document_state.get_active_project() if leaving_creative else None
-                active_document = document_state.get_active_document() if leaving_creative else None
+                notice = _switch_mode(session_state.COMPANION)
 
-                session_state.set_mode(session_state.COMPANION)
-
-                if leaving_creative and (active_project or active_document):
+                if notice:
                     console.print(
-                        f"[dim]Leaving creative mode -- "
-                        f"{f'project {active_project!r}' if active_project else 'the active document'} "
-                        "is still selected and will resume if you go back with /creative. "
-                        "Companion mode on. Say /talk again to leave.[/dim]\n"
+                        f"[dim]{notice} Companion mode on. "
+                        "Say /talk again to leave.[/dim]\n"
                     )
                 else:
                     console.print(
@@ -394,19 +428,31 @@ def main():
             continue
 
         if lowered == "/creative-off":
-            session_state.set_mode(session_state.NORMAL)
+            notice = _switch_mode(session_state.NORMAL)
             from voice import document_state
 
             document_state.clear_scope()
-            console.print(
-                "[dim]Creative mode off -- back to normal task mode.[/dim]\n"
-            )
+            if notice:
+                # clear_scope() just wiped what the notice referred to --
+                # /creative-off is an explicit, deliberate exit (unlike
+                # /talk or /coding), so clearing scope here is correct,
+                # but the notice's "will resume if you go back" promise
+                # would be misleading in this specific case. Say so plainly
+                # instead of reusing the generic notice text.
+                console.print(
+                    "[dim]Creative mode off -- back to normal task mode. "
+                    "The active document/project selection was cleared.[/dim]\n"
+                )
+            else:
+                console.print(
+                    "[dim]Creative mode off -- back to normal task mode.[/dim]\n"
+                )
             continue
 
         if lowered == "/creative" or lowered.startswith("/creative "):
             parts = stripped.split(maxsplit=1)
 
-            session_state.set_mode(session_state.CREATIVE)
+            _switch_mode(session_state.CREATIVE)
 
             if len(parts) == 2:
                 from tools.creative_tools import set_creative_document
@@ -424,7 +470,7 @@ def main():
         if lowered == "/project":
             from tools.creative_tools import get_creative_project
 
-            session_state.set_mode(session_state.CREATIVE)
+            _switch_mode(session_state.CREATIVE)
             console.print(f"[dim]{get_creative_project()}[/dim]\n")
             continue
 
@@ -432,23 +478,28 @@ def main():
             from tools.creative_tools import set_creative_project
 
             project_name = stripped.split(maxsplit=1)[1]
-            session_state.set_mode(session_state.CREATIVE)
+            _switch_mode(session_state.CREATIVE)
             console.print(
                 f"[dim]{set_creative_project(project_name)}[/dim]\n"
             )
             continue
 
         if lowered == "/coding-off":
-            session_state.set_mode(session_state.NORMAL)
-            console.print(
-                "[dim]Coding mode off -- back to normal task mode.[/dim]\n"
-            )
+            notice = _switch_mode(session_state.NORMAL)
+            if notice:
+                console.print(f"[dim]{notice} Coding mode off.[/dim]\n")
+            else:
+                console.print(
+                    "[dim]Coding mode off -- back to normal task mode.[/dim]\n"
+                )
             continue
 
         if lowered == "/coding" or lowered.startswith("/coding "):
             parts = stripped.split(maxsplit=1)
 
-            session_state.set_mode(session_state.CODING)
+            notice = _switch_mode(session_state.CODING)
+            if notice:
+                console.print(f"[dim]{notice}[/dim]\n")
 
             if len(parts) == 2:
                 from tools.git_tools import git_status
