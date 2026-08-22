@@ -97,7 +97,12 @@ CREATIVE_GENERATION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_creative_context",
-            "description": "Retrieve story passages from the active creative scope.",
+            "description": (
+                "The default retrieval call for any story-specific question. "
+                "Scopes automatically: uses the active document if one is "
+                "selected, otherwise the whole active project. Call this "
+                "first before making any claim about story canon."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -112,7 +117,11 @@ CREATIVE_GENERATION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "build_chapter_ideas_context",
-            "description": "Retrieve canon relevant to possible next chapters.",
+            "description": (
+                "Required first step before proposing new chapter directions "
+                "or plot ideas. Retrieves relevant canon with the same "
+                "automatic document/project scoping as get_creative_context."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -127,7 +136,11 @@ CREATIVE_GENERATION_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "build_scene_context",
-            "description": "Retrieve canon relevant to a scene or chapter.",
+            "description": (
+                "Required first step before writing a scene or chapter. "
+                "Retrieves relevant canon with the same automatic "
+                "document/project scoping as get_creative_context."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

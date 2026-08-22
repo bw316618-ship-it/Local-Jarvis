@@ -18,22 +18,51 @@ def _format_bytes_gb(num_bytes: int) -> str:
     return f"{num_bytes / (1024 ** 3):.1f} GB"
 
 
-def system_status() -> str:
-    """Return a snapshot of CPU, memory, disk, and uptime."""
+def system_status_snapshot() -> dict:
+    """Structured CPU/memory/disk/uptime snapshot.
+
+    This is the shared data source behind both system_status()'s
+    chat-facing string below and ui/hud_server.py's live "System Status"
+    HUD widget -- one psutil read, two presentations, so the two never
+    drift out of sync with each other. Memory/disk are kept in raw bytes
+    here (not pre-converted to GB) so a consumer can pick its own display
+    units rather than being locked into this module's formatting choice.
+    """
     cpu_percent = psutil.cpu_percent(interval=0.5)
     cpu_count = psutil.cpu_count()
 
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
 
-    uptime = timedelta(seconds=int(datetime.now().timestamp() - psutil.boot_time()))
+    uptime_seconds = int(datetime.now().timestamp() - psutil.boot_time())
+
+    return {
+        "cpu_percent": cpu_percent,
+        "cpu_count": cpu_count,
+        "memory_percent": mem.percent,
+        "memory_used_bytes": mem.used,
+        "memory_total_bytes": mem.total,
+        "disk_percent": disk.percent,
+        "disk_used_bytes": disk.used,
+        "disk_total_bytes": disk.total,
+        "uptime_seconds": uptime_seconds,
+        "process_count": len(psutil.pids()),
+    }
+
+
+def system_status() -> str:
+    """Return a snapshot of CPU, memory, disk, and uptime."""
+    snap = system_status_snapshot()
+    uptime = timedelta(seconds=snap["uptime_seconds"])
 
     lines = [
-        f"CPU: {cpu_percent:.0f}% used ({cpu_count} cores)",
-        f"Memory: {mem.percent:.0f}% used ({_format_bytes_gb(mem.used)} / {_format_bytes_gb(mem.total)})",
-        f"Disk: {disk.percent:.0f}% used ({_format_bytes_gb(disk.used)} / {_format_bytes_gb(disk.total)})",
+        f"CPU: {snap['cpu_percent']:.0f}% used ({snap['cpu_count']} cores)",
+        f"Memory: {snap['memory_percent']:.0f}% used "
+        f"({_format_bytes_gb(snap['memory_used_bytes'])} / {_format_bytes_gb(snap['memory_total_bytes'])})",
+        f"Disk: {snap['disk_percent']:.0f}% used "
+        f"({_format_bytes_gb(snap['disk_used_bytes'])} / {_format_bytes_gb(snap['disk_total_bytes'])})",
         f"Uptime: {uptime}",
-        f"Running processes: {len(psutil.pids())}",
+        f"Running processes: {snap['process_count']}",
     ]
     return "\n".join(lines)
 

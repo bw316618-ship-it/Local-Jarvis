@@ -254,7 +254,13 @@ CREATIVE_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_creative_document",
-            "description": "Search only the active creative document.",
+            "description": (
+                "Direct search of ONLY the active document, ignoring any active "
+                "project scope even if one is set. Use for a narrow, deliberate "
+                "lookup within the specific file currently selected -- for the "
+                "default retrieval call on any story question, use "
+                "get_creative_context instead, which scopes automatically."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -386,7 +392,14 @@ PROJECT_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "search_creative_project",
-            "description": "Search all indexed documents in the active project.",
+            "description": (
+                "Direct search across every document in the active project, "
+                "even if a specific document is also currently selected -- "
+                "use this when you need to check the whole project rather than "
+                "just the focused file. For the default retrieval call on any "
+                "story question, use get_creative_context instead, which stays "
+                "scoped to just the active document whenever one is selected."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
