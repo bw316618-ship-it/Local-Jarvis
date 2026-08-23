@@ -1,4 +1,3 @@
-
 """chat() flow: plan-skip heuristic, streaming rounds, memory recall
 injected into the prompt, short-term history, and memory storage firing
 exactly once regardless of which exit path is taken."""
@@ -142,7 +141,7 @@ def test_sentences_are_streamed_incrementally(monkeypatch):
     monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
 
     sentences = []
-    result = jarvis.chat("hi", on_sentence=sentences.append)
+    result = jarvis.chat("hi, how's it going today", on_sentence=sentences.append)
 
     assert result == "Hello. How are you?"
     assert sentences == ["Hello.", "How are you?"], "sentence boundaries should flush as they complete"
