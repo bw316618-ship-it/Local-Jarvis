@@ -123,7 +123,7 @@ def test_chat_uses_default_model_for_normal_when_no_override_configured(monkeypa
     fake_client = _patch_common_chat_deps(monkeypatch, jarvis)
 
     session_state.set_mode(NORMAL)
-    jarvis.chat("hello", on_step=lambda m: None)
+    jarvis.chat("hello there, what's the weather like", on_step=lambda m: None)
 
     used_model = fake_client.chat.call_args.kwargs.get("model") or fake_client.chat.call_args.args[0]
     assert used_model == "qwen3:4b"
