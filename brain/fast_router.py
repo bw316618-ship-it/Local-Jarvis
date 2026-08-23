@@ -121,7 +121,7 @@ def looks_multi_step(text: str) -> bool:
         return True
     if any(hint in normalized for hint in _MULTI_STEP_HINTS):
         return True
-    if normalized.count(" and ") >= 1 and len(normalized.split()) > 7:
+    if normalized.count(" and ") >= 1 and len(normalized.split()) >= 7:
         return True
     if normalized.count(",") >= 2:
         return True
