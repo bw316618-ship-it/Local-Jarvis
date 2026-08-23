@@ -83,44 +83,7 @@
     }
   }
 
-  /*
-   * The old maps.js implementation can create the same
-   * #jarvisMapWidget ID using a canvas.
-   *
-   * map_agent.js needs that ID to belong to its own Leaflet
-   * container. Remove the legacy canvas implementation if it
-   * exists.
-   */
-  function removeLegacyMap() {
-    const existingWidget =
-      document.getElementById("jarvisMapWidget");
-
-    const existingCanvas =
-      document.getElementById("jarvisMapCanvas");
-
-    /*
-     * Only remove it when the existing widget contains an actual
-     * canvas. This prevents us from deleting our own Leaflet map.
-     */
-    if (
-      existingWidget &&
-      existingCanvas &&
-      existingCanvas.tagName === "CANVAS"
-    ) {
-      existingWidget.remove();
-
-      const legacyOverlay =
-        document.getElementById("jarvisMapOverlay");
-
-      if (legacyOverlay) {
-        legacyOverlay.remove();
-      }
-    }
-  }
-
   function ensureUI() {
-    removeLegacyMap();
-
     if (document.getElementById("jarvisMapWidget")) {
       return;
     }
