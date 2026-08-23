@@ -1,11 +1,11 @@
 """
 Central configuration for Jarvis.
 
-Defaults live here. To override any of them without editing code, copy
-jarvis_config.example.json to jarvis_config.json at the project root and
-change just the keys you want -- anything you don't specify keeps its
-default. jarvis_config.json is gitignored, so personal tweaks (e.g. a
-different Ollama model, custom indexed folders) don't get committed.
+Performance-oriented defaults:
+- small active context
+- short tool loops
+- aggressive tool filtering
+- persistent model process handled by Ollama
 """
 
 import json
@@ -15,21 +15,14 @@ BASE_DIR = Path(__file__).resolve().parent
 USER_CONFIG_PATH = BASE_DIR / "jarvis_config.json"
 
 DEFAULTS = {
+    # Fast local model.
     "model": "qwen3:4b",
-    "mode_models": {
-        # Per-mode model override. Falls back to "model" above for any
-        # mode not listed here. Useful for e.g. giving CODING mode a
-        # coding-specialized model (qwen2.5-coder:7b, deepseek-coder, etc.)
-        # without switching companion/creative conversations to it too --
-        # those benefit more from a general-purpose model's tone than a
-        # code-specialized one's. Example override in jarvis_config.json:
-        #   "mode_models": {"coding": "qwen2.5-coder:7b"}
-        # Note this replaces the whole mapping, not just the key you set --
-        # same as every other dict/list value in this config.
-    },
-    "num_ctx": 8192,
-    "max_tool_rounds": 15,
-    "short_term_turns": 6,
+    "mode_models": {},
+    "num_ctx": 4096,
+    "max_tool_rounds": 8,
+    "short_term_turns": 4,
+
+    # Voice.
     "whisper_model": "base.en",
     "voice_listen_seconds": 6,
     "voice_silence_seconds": 1.2,
@@ -37,28 +30,36 @@ DEFAULTS = {
     "voice_max_recording_seconds": 30,
     "wake_word_threshold": 0.5,
     "command_timeout_seconds": 30,
-    "tool_call_timeout_seconds": 45,
+    "tool_call_timeout_seconds": 30,
+
+    # Retrieval.
     "index_roots": None,
     "index_chunk_size": 500,
     "index_chunk_overlap": 50,
     "index_max_file_mb": 20,
-    # NORMAL mode's tool list has grown to 65+ schemas (git, files, media,
-    # calendar, maps, desktop automation, etc. all merged into one flat
-    # list). Offering a local 4-8B model 65 candidates on every turn
-    # measurably hurts tool-selection accuracy versus offering ~20-30 --
-    # see brain/tool_relevance.py. tool_relevance_threshold: a mode's tool
-    # list is only filtered once it exceeds this size, so small modes
-    # (COMPANION, and CREATIVE/CODING today) are never affected.
-    # tool_relevance_top_k: how many relevance-ranked tools to keep beyond
-    # the always-included session-control set once filtering kicks in.
-    "tool_relevance_threshold": 30,
-    "tool_relevance_top_k": 20,
+    # Tool filtering.
+    "tool_relevance_threshold": 20,
+    "tool_relevance_top_k": 12,
+
+    # Streaming.
+    "streaming": True,
+
+    # Ollama generation settings.
+    "temperature": 0.2,
+    "top_p": 0.9,
+
     "piper_voice_model": "voices/en_US-amy-medium.onnx",
+
+    # Maps.
     "ors_api_key": None,
+
+    # HUD.
     "hud_http_port": 8765,
     "hud_ws_port": 8766,
     "hud_system_status_interval_seconds": 5,
     "backend_ws_port": 8770,
+
+    # Security.
     "device_auth_file": "data/trusted_devices.json",
 }
 
@@ -66,10 +67,16 @@ DEFAULTS = {
 def _load_user_overrides() -> dict:
     if not USER_CONFIG_PATH.exists():
         return {}
+
     try:
-        return json.loads(USER_CONFIG_PATH.read_text(encoding="utf-8"))
+        return json.loads(
+            USER_CONFIG_PATH.read_text(encoding="utf-8")
+        )
     except Exception as e:
-        print(f"[Jarvis config] Could not read jarvis_config.json, using defaults: {e}")
+        print(
+            "[Jarvis config] Could not read jarvis_config.json, "
+            f"using defaults: {e}"
+        )
         return {}
 
 
@@ -78,8 +85,12 @@ def _build_config() -> dict:
     overrides = _load_user_overrides()
 
     unknown_keys = set(overrides) - set(DEFAULTS)
+
     if unknown_keys:
-        print(f"[Jarvis config] Ignoring unknown config keys: {sorted(unknown_keys)}")
+        print(
+            "[Jarvis config] Ignoring unknown config keys: "
+            f"{sorted(unknown_keys)}"
+        )
 
     for key, value in overrides.items():
         if key in DEFAULTS:
@@ -89,12 +100,6 @@ def _build_config() -> dict:
 
 
 def get_index_roots() -> list[str]:
-    """Return the current configured indexing roots.
-
-    This deliberately reads CONFIG at call time rather than caching the
-    value during module import, so tests and runtime configuration changes
-    are reflected immediately.
-    """
     configured = CONFIG.get("index_roots")
     if configured:
         return list(configured)
@@ -107,18 +112,25 @@ def get_index_roots() -> list[str]:
 
 
 def get_model_for_mode(mode: str, explicit: str = None) -> str:
-    """Resolve which Ollama model to use for a given Jarvis mode.
-
-    Precedence: an explicit override (e.g. JarvisLLM(model=...)) always
-    wins: it's a deliberate choice by whoever constructed the LLM, and
-    should not be silently superseded by mode-based config. Otherwise,
-    CONFIG["mode_models"] is checked for the active mode; falling back to
-    CONFIG["model"] if that mode isn't listed. Reads CONFIG live, same as
-    get_index_roots(), so runtime config changes take effect immediately.
-    """
     if explicit:
         return explicit
-    return CONFIG.get("mode_models", {}).get(mode) or CONFIG["model"]
+
+    return (
+        CONFIG.get("mode_models", {}).get(mode)
+        or CONFIG["model"]
+    )
+
+
+def get_chat_options() -> dict:
+    """
+    Options shared by all normal inference calls.
+    """
+
+    return {
+        "num_ctx": CONFIG["num_ctx"],
+        "temperature": CONFIG["temperature"],
+        "top_p": CONFIG["top_p"],
+    }
 
 
 CONFIG = _build_config()
