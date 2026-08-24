@@ -213,6 +213,23 @@
     });
   }
 
+  function revealMapWidget() {
+    ensureUI();
+
+    const widget =
+      document.getElementById("jarvisMapWidget");
+
+    widget?.classList.add("map-visible");
+
+    localStorage.setItem(STORAGE_KEY, "1");
+
+    initMap();
+
+    requestAnimationFrame(() => {
+      map?.invalidateSize();
+    });
+  }
+
   function toggleVisibility() {
     ensureUI();
 
@@ -1240,6 +1257,12 @@
       payload.action ===
       "set_markers"
     ) {
+      // A set_markers action arriving from the backend (e.g. the user
+      // asked Jarvis to find nearby places via voice/chat) means there
+      // are results to show, whether or not the panel was ever manually
+      // opened. Reveal it now so markers aren't applied to a hidden,
+      // zero-size map the user never sees.
+      revealMapWidget();
       setMarkers(payload);
     }
 
@@ -1256,6 +1279,7 @@
       payload.action ===
       "focus_marker"
     ) {
+      revealMapWidget();
       focusMarker({
         lat:
           payload.latitude,
@@ -1441,27 +1465,7 @@
       toggleVisibility,
 
     open() {
-      ensureUI();
-
-      const widget =
-        document.getElementById(
-          "jarvisMapWidget"
-        );
-
-      widget?.classList.add(
-        "map-visible"
-      );
-
-      localStorage.setItem(
-        STORAGE_KEY,
-        "1"
-      );
-
-      initMap();
-
-      requestAnimationFrame(() => {
-        map?.invalidateSize();
-      });
+      revealMapWidget();
     },
 
     close() {

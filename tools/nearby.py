@@ -5,6 +5,15 @@ Nearby searches also publish their results to the HUD map so that a request
 such as "mark nearby cafes" both returns the places to Jarvis and visually
 pins them on the map.
 
+find_nearby_place is the ONLY Overpass-search tool exposed to the model.
+tools/map_hud.py used to have a second, near-identical search_map_places
+tool (its own CATEGORY_TAGS, its own query builder, its own haversine
+distance) that only pinned the map and returned no summary text -- that
+duplication made it ambiguous which tool the model would pick for a
+"find X near me" request, and picking the map_hud one meant the user got
+no readable answer. That tool has been removed; map_hud.py now only
+owns the map-only actions (clear/focus) that this module doesn't cover.
+
 Read-only.
 """
 
@@ -586,8 +595,9 @@ NEARBY_TOOL_SCHEMAS = [
                 "museums, monuments and other OpenStreetMap "
                 "categories. Uses the computer's current "
                 "location automatically and returns real "
-                "nearby places. When the map is open, results "
-                "are also pinned on the HUD map."
+                "nearby places. Results are also pinned on "
+                "the HUD map, which opens automatically if "
+                "it wasn't already."
             ),
 
             "parameters": {
