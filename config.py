@@ -53,6 +53,23 @@ DEFAULTS = {
     # Maps.
     "ors_api_key": None,
 
+    # Model tiers. "model" is the daily-driver default (small/fast,
+    # matched to the 6GB-VRAM Nitro V15 constraint); "heavy_model" is an
+    # optional larger model the user can opt into per-session via the
+    # /brain heavy command or enter_heavy_brain tool (see
+    # voice/session_state.py, tools/session_control.py). Unset by
+    # default -- same "quietly falls back to the default" pattern as
+    # ors_api_key -- since which model actually fits depends on what's
+    # pulled in Ollama and how much is offloaded to system RAM.
+    "heavy_model": None,
+
+    # Network tool retry (web search, weather, routing, nearby-place,
+    # geocoding/IP-location lookups). Only retryable failures are retried
+    # -- see tools/net.py:is_retryable -- so a bad query or 404 fails once,
+    # not network_retry_attempts times.
+    "network_retry_attempts": 3,
+    "network_retry_backoff_seconds": 0.5,
+
     # HUD.
     "hud_http_port": 8765,
     "hud_ws_port": 8766,
@@ -111,9 +128,35 @@ def get_index_roots() -> list[str]:
     ]
 
 
-def get_model_for_mode(mode: str, explicit: str = None) -> str:
+def get_model_for_mode(mode: str, explicit: str = None, heavy: bool = False) -> str:
+    """Resolve which Ollama model a chat turn should use.
+
+    Precedence, highest first:
+      1. `explicit` -- passed straight into JarvisLLM(model=...) at
+         construction time. Wins over everything else regardless of mode
+         or the heavy-brain flag.
+      2. Heavy brain -- if `heavy` is True and "heavy_model" is
+         configured, that model is used no matter which interaction mode
+         (normal/companion/creative/coding) is active. This is
+         deliberately orthogonal to mode_models below: heavy brain is a
+         "use your best model for this" toggle the user flips per
+         session (see voice/session_state.py's brain-tier state), not
+         something tied to a particular mode the way e.g. a
+         coding-specialized model is.
+      3. CONFIG["mode_models"][mode] -- a mode-specific model.
+      4. CONFIG["model"] -- the default daily-driver model.
+
+    If heavy=True but no "heavy_model" is configured, falls through to
+    (3)/(4) rather than erroring, same as an unset ors_api_key falling
+    back to OSRM instead of failing outright.
+    """
     if explicit:
         return explicit
+
+    if heavy:
+        heavy_model = CONFIG.get("heavy_model")
+        if heavy_model:
+            return heavy_model
 
     return (
         CONFIG.get("mode_models", {}).get(mode)

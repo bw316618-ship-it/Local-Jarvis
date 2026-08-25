@@ -23,6 +23,7 @@ import requests
 
 from tools.location import get_coordinates
 from tools.map_hud import _queue_action
+from tools.net import request_with_retry
 
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
@@ -484,7 +485,8 @@ def find_nearby_place(
     )
 
     try:
-        response = requests.post(
+        response = request_with_retry(
+            "POST",
             OVERPASS_URL,
             data={
                 "data": query,
@@ -492,8 +494,6 @@ def find_nearby_place(
             headers=OVERPASS_HEADERS,
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
-
-        response.raise_for_status()
 
         data = response.json()
 

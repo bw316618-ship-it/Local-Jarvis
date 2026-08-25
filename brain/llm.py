@@ -479,7 +479,9 @@ class JarvisLLM:
         # _stream_round/_make_plan both read self.model at call time, so
         # reassigning it here is all that's needed; neither method's
         # signature has to change.
-        self.model = get_model_for_mode(mode, explicit=self._explicit_model_override)
+        self.model = get_model_for_mode(
+            mode, explicit=self._explicit_model_override, heavy=session_state.is_heavy_brain()
+        )
 
         if mode == CREATIVE:
             ingestion_result = self._handle_creative_document_initialization(

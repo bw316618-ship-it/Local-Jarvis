@@ -1,0 +1,21 @@
+# Normalize all text files to LF in the repo, regardless of what the
+# committing machine's git config or editor uses. Prevents the class of
+# bug already hit once in start_jarvis_daemon.sh and found again in
+# ui/hud_server.py / ui/hud/static/map_agent.js (CRLF file with a chunk
+# of LF-only lines mixed in from a later edit on a different machine/editor).
+* text=auto eol=lf
+
+# Windows launchers intentionally keep CRLF -- cmd.exe is happier with it,
+# and start_jarvis_daemon.sh already had its CRLF bug fixed once; don't
+# reintroduce CRLF into the .sh counterpart.
+*.bat text eol=crlf
+*.sh text eol=lf
+
+# Binary assets -- do not run text normalization on these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.onnx binary
+*.woff binary
+*.woff2 binary

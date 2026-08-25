@@ -17,10 +17,12 @@ from voice import session_state
 
 def setup_function():
     session_state.set_mode(NORMAL)
+    session_state.exit_heavy_brain()
 
 
 def teardown_function():
     session_state.set_mode(NORMAL)
+    session_state.exit_heavy_brain()
 
 
 def make_jarvis():
@@ -57,6 +59,48 @@ def test_uses_mode_specific_model_when_configured(monkeypatch):
 def test_explicit_override_always_wins(monkeypatch):
     monkeypatch.setitem(config_module.CONFIG, "mode_models", {"coding": "qwen2.5-coder:7b"})
     assert get_model_for_mode(CODING, explicit="my-forced-model") == "my-forced-model"
+
+
+# --- heavy brain tier -----------------------------------------------------
+
+def test_heavy_brain_wins_over_mode_models_when_configured(monkeypatch):
+    monkeypatch.setitem(config_module.CONFIG, "heavy_model", "qwen3:30b")
+    monkeypatch.setitem(config_module.CONFIG, "mode_models", {"coding": "qwen2.5-coder:7b"})
+    assert get_model_for_mode(CODING, heavy=True) == "qwen3:30b"
+
+
+def test_heavy_brain_falls_back_when_no_heavy_model_configured(monkeypatch):
+    monkeypatch.setitem(config_module.CONFIG, "heavy_model", None)
+    monkeypatch.setitem(config_module.CONFIG, "mode_models", {"coding": "qwen2.5-coder:7b"})
+    assert get_model_for_mode(CODING, heavy=True) == "qwen2.5-coder:7b"
+    monkeypatch.setitem(config_module.CONFIG, "mode_models", {})
+    monkeypatch.setitem(config_module.CONFIG, "model", "qwen3:4b")
+    assert get_model_for_mode(NORMAL, heavy=True) == "qwen3:4b"
+
+
+def test_explicit_override_wins_over_heavy_brain_too(monkeypatch):
+    monkeypatch.setitem(config_module.CONFIG, "heavy_model", "qwen3:30b")
+    assert get_model_for_mode(NORMAL, explicit="pinned", heavy=True) == "pinned"
+
+
+def test_heavy_brain_flag_defaults_off_and_toggles():
+    assert session_state.is_heavy_brain() is False
+    session_state.enter_heavy_brain()
+    assert session_state.is_heavy_brain() is True
+    session_state.exit_heavy_brain()
+    assert session_state.is_heavy_brain() is False
+
+
+def test_heavy_brain_is_independent_of_interaction_mode():
+    """Switching interaction mode (companion/creative/coding) must not
+    silently reset or depend on the brain-tier flag -- they're tracked
+    separately on purpose (see voice/session_state.py's module docstring)."""
+    session_state.enter_heavy_brain()
+    session_state.set_mode(CODING)
+    assert session_state.is_heavy_brain() is True
+    session_state.set_mode(NORMAL)
+    assert session_state.is_heavy_brain() is True
+    session_state.exit_heavy_brain()
 
 
 # --- JarvisLLM instance attribute safety --------------------------------
@@ -141,3 +185,20 @@ def test_chat_respects_explicit_constructor_override_over_mode_models(monkeypatc
 
     used_model = fake_client.chat.call_args.kwargs.get("model") or fake_client.chat.call_args.args[0]
     assert used_model == "user-pinned-model"
+
+
+def test_chat_uses_heavy_model_when_heavy_brain_is_on(monkeypatch):
+    monkeypatch.setitem(config_module.CONFIG, "heavy_model", "qwen3:30b")
+    monkeypatch.setitem(config_module.CONFIG, "mode_models", {})
+    monkeypatch.setitem(config_module.CONFIG, "model", "qwen3:4b")
+
+    jarvis = make_jarvis()
+    fake_client = _patch_common_chat_deps(monkeypatch, jarvis)
+
+    session_state.set_mode(NORMAL)
+    session_state.enter_heavy_brain()
+    jarvis.chat("think carefully about this", on_step=lambda m: None)
+
+    used_model = fake_client.chat.call_args.kwargs.get("model") or fake_client.chat.call_args.args[0]
+    assert used_model == "qwen3:30b"
+    assert jarvis.model == "qwen3:30b"

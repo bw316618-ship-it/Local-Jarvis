@@ -48,6 +48,16 @@ def exit_coding_mode() -> str:
     return "Back to normal mode."
 
 
+def enter_heavy_brain() -> str:
+    session_state.enter_heavy_brain()
+    return "Heavy brain enabled -- using the larger model until turned off."
+
+
+def exit_heavy_brain() -> str:
+    session_state.exit_heavy_brain()
+    return "Back to the fast default model."
+
+
 SESSION_TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -121,6 +131,27 @@ SESSION_TOOL_SCHEMAS = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "enter_heavy_brain",
+            "description": (
+                "Switch to the larger, slower model for this session -- use when the "
+                "user explicitly asks for more careful reasoning, a harder problem, or "
+                "says something like 'use your best model' or 'think harder about this'. "
+                "Independent of interaction mode; stays on until exit_heavy_brain is called."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "exit_heavy_brain",
+            "description": "Switch back to the fast default model.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 SESSION_TOOL_FUNCTIONS = {
@@ -133,6 +164,8 @@ SESSION_TOOL_FUNCTIONS = {
     "exit_creative_mode": exit_creative_mode,
     "enter_coding_mode": enter_coding_mode,
     "exit_coding_mode": exit_coding_mode,
+    "enter_heavy_brain": enter_heavy_brain,
+    "exit_heavy_brain": exit_heavy_brain,
 }
 
 SESSION_RISKY_TOOLS = {"end_session"}

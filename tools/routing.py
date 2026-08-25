@@ -31,6 +31,7 @@ import requests
 
 from config import CONFIG
 from tools.location import get_coordinates
+from tools.net import request_with_retry
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 ORS_URL = "https://api.openrouteservice.org/v2/directions"
@@ -56,13 +57,13 @@ NOMINATIM_HEADERS = {"User-Agent": "Local-Jarvis/1.0 (personal offline assistant
 
 def _geocode(place_name: str) -> tuple:
     try:
-        response = requests.get(
+        response = request_with_retry(
+            "GET",
             NOMINATIM_URL,
             params={"q": place_name, "format": "json", "limit": 1},
             headers=NOMINATIM_HEADERS,
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
-        response.raise_for_status()
         results = response.json()
     except requests.RequestException as e:
         raise RuntimeError(f"Could not look up '{place_name}': {e}") from e
@@ -89,8 +90,9 @@ def _route_via_ors(profile: str, origin: tuple, destination: tuple) -> str:
     headers = {"Authorization": api_key, "Content-Type": "application/json"}
 
     try:
-        response = requests.post(url, json=body, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
-        response.raise_for_status()
+        response = request_with_retry(
+            "POST", url, json=body, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS
+        )
         data = response.json()
     except requests.RequestException as e:
         raise RuntimeError(f"OpenRouteService request failed: {e}") from e
@@ -116,8 +118,9 @@ def _route_via_osrm(profile: str, origin: tuple, destination: tuple) -> str:
     url = f"{OSRM_DEMO_URL}/{coords}"
 
     try:
-        response = requests.get(url, params={"overview": "false"}, timeout=REQUEST_TIMEOUT_SECONDS)
-        response.raise_for_status()
+        response = request_with_retry(
+            "GET", url, params={"overview": "false"}, timeout=REQUEST_TIMEOUT_SECONDS
+        )
         data = response.json()
     except requests.RequestException as e:
         raise RuntimeError(f"OSRM request failed: {e}") from e

@@ -30,6 +30,7 @@ COMMANDS = [
     ("/voice [N]", "Speak your message"),
     ("/wake", "Always-listening mode"),
     ("/speak on|off", "Toggle spoken replies"),
+    ("/brain heavy|fast", "Switch between the fast default model and a heavier one"),
     ("/talk", "Toggle companion mode"),
     ("/creative [path]", "Enter creative mode, optionally selecting a story/PDF"),
     ("/creative-off", "Leave creative mode"),
@@ -404,6 +405,26 @@ def main():
             )
             continue
 
+        if lowered in ("/brain heavy", "/brain fast"):
+            if lowered == "/brain heavy":
+                session_state.enter_heavy_brain()
+                console.print(
+                    "[dim]Heavy brain on -- using the larger model until "
+                    "/brain fast.[/dim]\n"
+                )
+            else:
+                session_state.exit_heavy_brain()
+                console.print(
+                    "[dim]Back to the fast default model.[/dim]\n"
+                )
+            continue
+
+        if lowered.startswith("/brain"):
+            console.print(
+                "[dim]Usage: /brain heavy  or  /brain fast[/dim]\n"
+            )
+            continue
+
         if lowered == "/talk":
             if session_state.current_mode() == session_state.COMPANION:
                 _switch_mode(session_state.NORMAL)
@@ -570,6 +591,15 @@ def main():
                                 expand=False,
                             )
                         )
+                        # Falls back through to listen_for_wake_word()
+                        # again at the top of the loop -- leaving the HUD
+                        # on "error" would make it look like something is
+                        # still wrong while Jarvis is actually back to
+                        # quietly waiting for the wake word. Every other
+                        # path out of this loop (no transcription,
+                        # Ctrl+C) already resets to "idle" before looping
+                        # or exiting; this is the one that didn't.
+                        hud.set_state("idle")
                         continue
 
                     if not transcribed:
@@ -639,6 +669,10 @@ def main():
                     )
                 )
                 console.print()
+                # Control returns to the REPL prompt from here -- leaving
+                # the HUD on "error" indefinitely until the next command
+                # would misrepresent an idle assistant as still broken.
+                hud.set_state("idle")
                 continue
 
             if not transcribed:

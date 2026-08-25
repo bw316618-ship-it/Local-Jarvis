@@ -57,6 +57,8 @@ import geoip2.database
 import geoip2.errors
 import requests
 
+from tools.net import request_with_retry
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 GEOIP_DB_PATH = BASE_DIR / "geoip" / "GeoLite2-City.mmdb"
 
@@ -71,7 +73,8 @@ NOMINATIM_HEADERS = {
 
 def _reverse_geocode(lat: float, lon: float) -> dict:
     try:
-        response = requests.get(
+        response = request_with_retry(
+            "GET",
             NOMINATIM_REVERSE_URL,
             params={
                 "lat": lat,
@@ -82,7 +85,6 @@ def _reverse_geocode(lat: float, lon: float) -> dict:
             headers=NOMINATIM_HEADERS,
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
-        response.raise_for_status()
         data = response.json()
     except (requests.RequestException, ValueError):
         return {
@@ -241,8 +243,7 @@ def _macos_coordinates() -> dict:
 
 def _get_public_ip() -> str:
     try:
-        response = requests.get(IP_ECHO_URL, timeout=REQUEST_TIMEOUT_SECONDS)
-        response.raise_for_status()
+        response = request_with_retry("GET", IP_ECHO_URL, timeout=REQUEST_TIMEOUT_SECONDS)
         ip = response.text.strip()
     except requests.RequestException as e:
         raise RuntimeError(f"Could not determine the public IP address: {e}") from e

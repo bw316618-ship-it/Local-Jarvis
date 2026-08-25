@@ -1,5 +1,6 @@
 from unittest.mock import Mock, patch
 
+import tools.net as net
 import tools.weather as weather
 
 
@@ -42,7 +43,7 @@ def test_get_weather_uses_current_coordinates():
     response.json.return_value = payload
 
     with patch.object(weather, "get_coordinates", return_value=location):
-        with patch.object(weather.requests, "get", return_value=response) as request:
+        with patch.object(net.requests, "get", return_value=response) as request:
             result = weather.get_weather()
 
     assert "31" in result

@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from tools.location import get_coordinates
+from tools.net import request_with_retry
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 REQUEST_TIMEOUT_SECONDS = 10
@@ -91,13 +92,13 @@ def get_weather() -> str:
     }
 
     try:
-        response = requests.get(
+        response = request_with_retry(
+            "GET",
             OPEN_METEO_URL,
             params=params,
             timeout=REQUEST_TIMEOUT_SECONDS,
             headers={"User-Agent": "Local-Jarvis/1.0"},
         )
-        response.raise_for_status()
         data = response.json()
     except requests.RequestException as exc:
         return f"Weather lookup failed: {exc}"

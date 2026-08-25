@@ -5,6 +5,13 @@ The active interaction mode is a named value rather than a collection of
 independent boolean flags. This lets Jarvis add modes such as companion,
 creative, coding, or journaling without duplicating the mode-switching
 architecture.
+
+Brain tier (fast/heavy) is tracked separately from interaction mode
+rather than folded into it. A user might want the heavier model while
+in coding mode just as easily as in normal mode -- tying "heavy" to a
+specific mode would mean either duplicating every mode into a "heavy"
+variant or losing the choice when switching modes mid-session. Keeping
+it a second independent flag avoids both.
 """
 
 import threading
@@ -16,8 +23,14 @@ CODING = "coding"
 
 VALID_MODES = {NORMAL, COMPANION, CREATIVE, CODING}
 
+BRAIN_FAST = "fast"
+BRAIN_HEAVY = "heavy"
+
 _mode_lock = threading.Lock()
 _current_mode = NORMAL
+
+_brain_lock = threading.Lock()
+_current_brain_tier = BRAIN_FAST
 
 _mute_event = threading.Event()
 _end_requested_event = threading.Event()
@@ -102,3 +115,33 @@ def enter_coding_mode() -> None:
 
 def exit_coding_mode() -> None:
     set_mode(NORMAL)
+
+
+def current_brain_tier() -> str:
+    with _brain_lock:
+        return _current_brain_tier
+
+
+def set_brain_tier(tier: str) -> str:
+    if tier not in (BRAIN_FAST, BRAIN_HEAVY):
+        raise ValueError(
+            f"Unknown brain tier '{tier}'. Valid tiers: {sorted((BRAIN_FAST, BRAIN_HEAVY))}"
+        )
+
+    global _current_brain_tier
+
+    with _brain_lock:
+        _current_brain_tier = tier
+        return _current_brain_tier
+
+
+def is_heavy_brain() -> bool:
+    return current_brain_tier() == BRAIN_HEAVY
+
+
+def enter_heavy_brain() -> None:
+    set_brain_tier(BRAIN_HEAVY)
+
+
+def exit_heavy_brain() -> None:
+    set_brain_tier(BRAIN_FAST)

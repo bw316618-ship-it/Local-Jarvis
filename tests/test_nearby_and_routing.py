@@ -4,6 +4,7 @@ with realistic response shapes, no live requests in tests."""
 
 from unittest.mock import MagicMock, patch
 
+import tools.net as net
 import tools.nearby as nb
 import tools.routing as rt
 
@@ -22,7 +23,7 @@ def test_find_nearby_place_sorts_by_distance_and_dedupes(monkeypatch):
         ]
     }
     monkeypatch.setattr(nb, "get_coordinates", lambda: LONDON)
-    with patch.object(nb.requests, "post") as mock_post:
+    with patch.object(net.requests, "post") as mock_post:
         mock_post.return_value = MagicMock(status_code=200, json=lambda: fake_response)
         mock_post.return_value.raise_for_status = lambda: None
         result = nb.find_nearby_place("metro station")
@@ -35,7 +36,7 @@ def test_find_nearby_place_sorts_by_distance_and_dedupes(monkeypatch):
 
 def test_find_nearby_place_uses_mapped_tag_filters(monkeypatch):
     monkeypatch.setattr(nb, "get_coordinates", lambda: LONDON)
-    with patch.object(nb.requests, "post") as mock_post:
+    with patch.object(net.requests, "post") as mock_post:
         mock_post.return_value = MagicMock(status_code=200, json=lambda: {"elements": []})
         mock_post.return_value.raise_for_status = lambda: None
         nb.find_nearby_place("pharmacy")
@@ -46,7 +47,7 @@ def test_find_nearby_place_uses_mapped_tag_filters(monkeypatch):
 
 def test_find_nearby_place_falls_back_to_free_text_for_unmapped_category(monkeypatch):
     monkeypatch.setattr(nb, "get_coordinates", lambda: LONDON)
-    with patch.object(nb.requests, "post") as mock_post:
+    with patch.object(net.requests, "post") as mock_post:
         mock_post.return_value = MagicMock(status_code=200, json=lambda: {"elements": []})
         mock_post.return_value.raise_for_status = lambda: None
         result = nb.find_nearby_place("Trader Joes")
@@ -58,7 +59,7 @@ def test_find_nearby_place_falls_back_to_free_text_for_unmapped_category(monkeyp
 
 def test_find_nearby_place_reports_location_failure_without_calling_overpass(monkeypatch):
     monkeypatch.setattr(nb, "get_coordinates", lambda: (_ for _ in ()).throw(RuntimeError("no db configured")))
-    with patch.object(nb.requests, "post") as mock_post:
+    with patch.object(net.requests, "post") as mock_post:
         result = nb.find_nearby_place("pharmacy")
         assert not mock_post.called, "must not call Overpass if location couldn't be resolved"
     assert "no db configured" in result
@@ -74,7 +75,7 @@ def test_get_route_via_ors_when_key_configured(monkeypatch):
     monkeypatch.setattr(rt, "get_coordinates", lambda: LONDON)
     fake_response = {"routes": [{"summary": {"distance": 1250.5, "duration": 900.0}}]}
     with patch.dict(rt.CONFIG, {"ors_api_key": "fake-key"}):
-        with patch.object(rt.requests, "post") as mock_post:
+        with patch.object(net.requests, "post") as mock_post:
             mock_post.return_value = MagicMock(status_code=200, json=lambda: fake_response)
             mock_post.return_value.raise_for_status = lambda: None
             result = rt.get_route(destination_lat=51.51, destination_lon=-0.12, profile="walking")
@@ -86,7 +87,7 @@ def test_get_route_falls_back_to_osrm_for_driving_without_a_key(monkeypatch):
     monkeypatch.setattr(rt, "get_coordinates", lambda: LONDON)
     fake_response = {"code": "Ok", "routes": [{"distance": 5200.0, "duration": 600.0}]}
     with patch.dict(rt.CONFIG, {"ors_api_key": None}):
-        with patch.object(rt.requests, "get") as mock_get:
+        with patch.object(net.requests, "get") as mock_get:
             mock_get.return_value = MagicMock(status_code=200, json=lambda: fake_response)
             mock_get.return_value.raise_for_status = lambda: None
             result = rt.get_route(destination_lat=51.55, destination_lon=-0.10, profile="driving")
@@ -108,10 +109,10 @@ def test_get_route_geocodes_a_destination_name(monkeypatch):
     fake_geocode = [{"lat": "48.8584", "lon": "2.2945"}]
     fake_ors = {"routes": [{"summary": {"distance": 1000.0, "duration": 600.0}}]}
     with patch.dict(rt.CONFIG, {"ors_api_key": "fake-key"}):
-        with patch.object(rt.requests, "get") as mock_get:
+        with patch.object(net.requests, "get") as mock_get:
             mock_get.return_value = MagicMock(status_code=200, json=lambda: fake_geocode)
             mock_get.return_value.raise_for_status = lambda: None
-            with patch.object(rt.requests, "post") as mock_post:
+            with patch.object(net.requests, "post") as mock_post:
                 mock_post.return_value = MagicMock(status_code=200, json=lambda: fake_ors)
                 mock_post.return_value.raise_for_status = lambda: None
                 result = rt.get_route(destination_name="Eiffel Tower")
@@ -122,7 +123,7 @@ def test_get_route_geocodes_a_destination_name(monkeypatch):
 
 def test_get_route_geocode_no_match_is_reported_cleanly(monkeypatch):
     monkeypatch.setattr(rt, "get_coordinates", lambda: LONDON)
-    with patch.object(rt.requests, "get") as mock_get:
+    with patch.object(net.requests, "get") as mock_get:
         mock_get.return_value = MagicMock(status_code=200, json=lambda: [])
         mock_get.return_value.raise_for_status = lambda: None
         result = rt.get_route(destination_name="Nowhereville Xyzzy")
@@ -141,7 +142,7 @@ def test_get_route_uses_explicit_origin_without_calling_get_coordinates(monkeypa
     monkeypatch.setattr(rt, "get_coordinates", lambda: called.append(True) or LONDON)
     fake_ors = {"routes": [{"summary": {"distance": 500.0, "duration": 300.0}}]}
     with patch.dict(rt.CONFIG, {"ors_api_key": "fake-key"}):
-        with patch.object(rt.requests, "post") as mock_post:
+        with patch.object(net.requests, "post") as mock_post:
             mock_post.return_value = MagicMock(status_code=200, json=lambda: fake_ors)
             mock_post.return_value.raise_for_status = lambda: None
             rt.get_route(origin_lat=40.0, origin_lon=-73.0, destination_lat=40.1, destination_lon=-73.1)
