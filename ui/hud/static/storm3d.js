@@ -375,34 +375,45 @@ function init(canvas, initialColor) {
   try {
     renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+    camera.position.set(0, 9, 24);
+    camera.lookAt(0, 0, 0);
+
+    themeColor = new THREE.Color(initialColor || "#e08a2e");
+
+    buildCore();
+    ringMeshes = RING_DEFS.map(buildRing);
+    buildFragments();
+    applyTheme();
+
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), BLOOM_BASE_STRENGTH, BLOOM_RADIUS, BLOOM_THRESHOLD);
+    composer.addPass(bloomPass);
+    applyBloomStrength();
+
+    resize();
+    window.addEventListener("resize", resize);
+
+    available = true;
+    return true;
   } catch (e) {
+    // Whatever failed -- WebGL context creation, or anything after it --
+    // release the renderer if one was actually created so a caller that
+    // retries init() later doesn't leak a second live WebGL context on
+    // top of this failed one. Browsers cap the number of live contexts
+    // per page (historically ~16), so repeated failed-then-retried
+    // attempts without this would eventually exhaust that budget for
+    // real, on top of just being wasteful.
+    if (renderer) {
+      renderer.dispose();
+      renderer = null;
+    }
     available = false;
     return false;
   }
-
-  scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
-  camera.position.set(0, 9, 24);
-  camera.lookAt(0, 0, 0);
-
-  themeColor = new THREE.Color(initialColor || "#e08a2e");
-
-  buildCore();
-  ringMeshes = RING_DEFS.map(buildRing);
-  buildFragments();
-  applyTheme();
-
-  composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene, camera));
-  bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), BLOOM_BASE_STRENGTH, BLOOM_RADIUS, BLOOM_THRESHOLD);
-  composer.addPass(bloomPass);
-  applyBloomStrength();
-
-  resize();
-  window.addEventListener("resize", resize);
-
-  available = true;
-  return true;
 }
 
 function start() {

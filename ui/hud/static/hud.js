@@ -327,8 +327,6 @@ function activateStormVisual() {
     );
 
   if (!stormInitialized) {
-    stormInitialized = true;
-
     const { color } =
       readThemeVars();
 
@@ -341,7 +339,30 @@ function activateStormVisual() {
 
     stormUsingWebGL = !!ok;
 
-    if (!stormUsingWebGL) {
+    if (stormUsingWebGL) {
+      // Only latch "already initialized" on success. A failed attempt
+      // (WebGL unavailable, module still loading, a transient GPU
+      // hiccup) used to set this flag too, which permanently locked
+      // the page into the CSS fallback for the rest of that page's
+      // lifetime -- switching back to storm mode later would just
+      // reapply the fallback without ever calling StormScene.init()
+      // again, even after whatever caused the failure was fixed or
+      // resolved itself. Leaving it false lets the next storm-mode
+      // activation retry cleanly.
+      stormInitialized = true;
+
+      // Undo whatever a *previous* failed attempt left behind -- if
+      // this succeeded on a retry, the fallback may already be marked
+      // "active" and the canvas hidden from that earlier failure, and
+      // both need to be reversed or the working WebGL canvas would
+      // stay hidden behind (or alongside) the CSS fallback.
+      stormFallback.classList.remove(
+        "active"
+      );
+
+      stormCanvas.style.display =
+        "";
+    } else {
       stormFallback.classList.add(
         "active"
       );
