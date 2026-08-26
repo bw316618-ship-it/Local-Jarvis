@@ -50,6 +50,49 @@ def _hash_token(token: str) -> str:
     ).hexdigest()
 
 
+class _StaticFileHandler(SimpleHTTPRequestHandler):
+    """SimpleHTTPRequestHandler, but with .js/.mjs (and a few other
+    types the HUD actually serves) hardcoded rather than left to
+    mimetypes.guess_type()'s platform-dependent fallback.
+
+    SimpleHTTPRequestHandler.extensions_map only hardcodes compression
+    extensions (.gz, .bz2, .xz, .Z) -- everything else, including .js,
+    falls through to mimetypes.guess_type(), which on Windows partly
+    sources its answers from the registry (HKEY_CLASSES_ROOT). On a
+    non-trivial number of real Windows machines that registry entry for
+    .js is missing or has been overwritten by other installed software,
+    so guess_type() returns something other than a JS MIME type -- most
+    often text/plain.
+
+    Classic <script src="...">  tags don't care what Content-Type they
+    were served with and run regardless. type="module" scripts do:
+    browsers strictly reject a module script whose response
+    Content-Type isn't a JavaScript MIME type, and they do this
+    silently from Python's point of view -- the browser console shows
+    "Failed to load module script: Expected a JavaScript module script
+    but the server responded with a MIME type of ...", but the HTTP
+    request itself succeeds (200 OK) and nothing here would print an
+    error. That's exactly the shape of "everything else in the HUD
+    works, the three.js/storm3d.js path just silently never activates".
+
+    storm3d.js is the only module-script entry point today, but the
+    fix hardcodes the map rather than special-casing that one file so
+    any future module script (or nested import under vendor/three/)
+    is covered the same way without relying on the host OS's registry
+    being in a good state.
+    """
+
+    extensions_map = {
+        **SimpleHTTPRequestHandler.extensions_map,
+        ".js": "text/javascript",
+        ".mjs": "text/javascript",
+        ".css": "text/css",
+        ".json": "application/json",
+        ".svg": "image/svg+xml",
+        ".wasm": "application/wasm",
+    }
+
+
 class HUDBridge:
     """Local HTTP + authenticated WebSocket bridge."""
 
@@ -342,7 +385,7 @@ class HUDBridge:
     def _run_http_server(self):
         try:
             handler = partial(
-                SimpleHTTPRequestHandler,
+                _StaticFileHandler,
                 directory=str(STATIC_DIR),
             )
 
