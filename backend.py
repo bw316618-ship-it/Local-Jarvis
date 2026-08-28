@@ -17,13 +17,6 @@ BACKEND_WS_PORT = CONFIG["backend_ws_port"]
 
 class JarvisBackend:
     def __init__(self, runtime=None, ws_port=BACKEND_WS_PORT):
-        # `runtime`, if given, is only used as the very first device's
-        # JarvisRuntime (see _get_runtime) -- kept so tests/callers can
-        # still inject a mock. Every device gets its OWN JarvisRuntime
-        # (and therefore its own JarvisLLM / short-term history / risky-
-        # tool confirmation routing) so that two devices talking to Jarvis
-        # at the same time never share conversation state or cross-route
-        # a confirmation prompt to the wrong device.
         self.runtime = runtime or JarvisRuntime()
         self.ws_port = ws_port
 
@@ -34,62 +27,34 @@ class JarvisBackend:
         self._loop = None
         self._stop_event = None
         self._clients = set()
-
-        # websocket -> trusted device record
         self._authenticated = {}
-
-        # request_id -> {
-        #   request: {...},
-        #   websocket: websocket,
-        #   event: asyncio.Event,
-        #   approved: bool | None,
-        #   token: str | None,
-        # }
         self._pending = {}
-
-        # device_id -> JarvisRuntime, and device_id -> a lock serializing
-        # that device's own messages. Keyed by device_id (not websocket)
-        # so a device that reconnects on a new socket keeps its running
-        # conversation rather than starting a fresh one.
         self._runtimes = {}
         self._runtime_locks = {}
-
         self._lock = threading.RLock()
         self._available = False
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
-
     def start(self):
         if self._available:
             return True
-
         thread = threading.Thread(
             target=self._run,
             daemon=True,
             name="jarvis-backend",
         )
         thread.start()
-
         self._available = True
         return True
-
     def stop(self):
         if not self._available:
             return
-
         if self._loop and self._stop_event:
             self._loop.call_soon_threadsafe(
                 self._stop_event.set
             )
-
         self._available = False
-
     def _run(self):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-
         try:
             self._loop.run_until_complete(
                 self._serve()
