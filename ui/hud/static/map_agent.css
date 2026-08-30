@@ -274,6 +274,141 @@
    MAP
    ============================================================ */
 
+.jarvis-map-search {
+  flex: 0 0 30px;
+
+  display: flex;
+  align-items: center;
+
+  gap: 6px;
+
+  padding: 0 9px;
+
+  border-bottom: 1px solid rgba(
+    116,
+    215,
+    255,
+    0.12
+  );
+
+  background: rgba(
+    5,
+    14,
+    21,
+    0.94
+  );
+
+  position: relative;
+  z-index: 19;
+}
+
+.jarvis-map-search input {
+  flex: 1;
+  min-width: 0;
+
+  height: 22px;
+
+  padding: 0 8px;
+
+  border: 1px solid rgba(
+    150,
+    220,
+    255,
+    0.16
+  );
+
+  background: rgba(
+    255,
+    255,
+    255,
+    0.025
+  );
+
+  color: rgba(
+    220,
+    245,
+    255,
+    0.85
+  );
+
+  font:
+    8px/1
+    "Segoe UI",
+    Arial,
+    sans-serif;
+
+  letter-spacing: 0.02em;
+}
+
+.jarvis-map-search input::placeholder {
+  color: rgba(
+    180,
+    215,
+    230,
+    0.35
+  );
+}
+
+.jarvis-map-search input:focus {
+  outline: none;
+
+  border-color: rgba(
+    150,
+    220,
+    255,
+    0.5
+  );
+}
+
+.jarvis-map-search button {
+  flex: 0 0 auto;
+
+  height: 22px;
+  padding: 0 10px;
+
+  border: 1px solid rgba(
+    150,
+    220,
+    255,
+    0.16
+  );
+
+  background: rgba(
+    255,
+    255,
+    255,
+    0.025
+  );
+
+  color: rgba(
+    220,
+    245,
+    255,
+    0.7
+  );
+
+  font:
+    700 8px/1
+    "Segoe UI",
+    Arial,
+    sans-serif;
+
+  letter-spacing: 0.06em;
+
+  cursor: pointer;
+}
+
+.jarvis-map-search button:hover {
+  border-color: rgba(
+    150,
+    220,
+    255,
+    0.4
+  );
+
+  color: #fff;
+}
+
 .jarvis-map-canvas {
   position: relative;
 

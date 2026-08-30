@@ -83,6 +83,31 @@
     }
   }
 
+  /*
+   * Send a message to the backend over the same authenticated socket
+   * hud.js uses for chat -- window.JarvisSocket is the raw WebSocket
+   * instance hud.js exposes as soon as a connection opens (see
+   * hud.js's connect()). Guarded the same way hud.js guards its own
+   * user_message send: socket open AND this device already
+   * authenticated, so an unauthenticated or not-yet-connected tab
+   * fails quietly rather than throwing.
+   */
+  function sendToBackend(payload) {
+    const socket = window.JarvisSocket;
+    const wrap = document.getElementById("wrap");
+
+    if (
+      socket &&
+      socket.readyState === WebSocket.OPEN &&
+      wrap?.dataset.authenticated === "true"
+    ) {
+      socket.send(JSON.stringify(payload));
+      return true;
+    }
+
+    return false;
+  }
+
   function ensureUI() {
     if (document.getElementById("jarvisMapWidget")) {
       return;
@@ -157,6 +182,30 @@
       class: "jarvis-map-canvas",
     });
 
+    const searchForm = createElement("form", {
+      id: "jarvisMapSearchForm",
+      class: "jarvis-map-search",
+    });
+
+    const searchInput = createElement("input", {
+      id: "jarvisMapSearchInput",
+      type: "text",
+      placeholder: "Search places, e.g. \"coffee\" or an address...",
+      "aria-label": "Search the map",
+      autocomplete: "off",
+    });
+
+    const searchButton = createElement(
+      "button",
+      {
+        id: "jarvisMapSearchButton",
+        type: "submit",
+      },
+      "SEARCH"
+    );
+
+    searchForm.append(searchInput, searchButton);
+
     const results = createElement("div", {
       id: "jarvisMapResults",
       class: "jarvis-map-results",
@@ -174,6 +223,7 @@
 
     widget.append(
       header,
+      searchForm,
       mapContainer,
       results,
       details
@@ -201,10 +251,17 @@
       }
     });
 
+    searchForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      submitSearch(searchInput.value);
+    });
+
     widget.addEventListener("click", (event) => {
       if (
         !expanded &&
         !event.target.closest("button") &&
+        !event.target.closest("form") &&
         !event.target.closest(".jarvis-map-result") &&
         !event.target.closest(".jarvis-map-details")
       ) {
@@ -517,6 +574,23 @@
 
     markerLayer =
       L.layerGroup().addTo(map);
+
+    /*
+     * Click anywhere on the base map (not on a marker -- marker clicks
+     * already call event.originalEvent.stopPropagation(), which stops
+     * this Leaflet map-level click from also firing for the same
+     * physical click) to reverse-geocode that point and show what's
+     * there, the way Google Maps' "what's here" works.
+     */
+    map.on(
+      "click",
+      (event) => {
+        reverseGeocodeClick(
+          event.latlng.lat,
+          event.latlng.lng
+        );
+      }
+    );
 
     locateUser();
 
@@ -1248,6 +1322,83 @@
     renderResults();
   }
 
+  function submitSearch(query) {
+    const trimmed = String(query || "").trim();
+
+    if (!trimmed) {
+      return;
+    }
+
+    ensureUI();
+    revealMapWidget();
+    setExpanded(true);
+    setStatus(`Searching "${trimmed}"...`);
+
+    if (!sendToBackend({ type: "map_search", query: trimmed })) {
+      setStatus("Not connected -- can't search right now.");
+    }
+  }
+
+  function reverseGeocodeClick(lat, lon) {
+    setStatus("Identifying location...");
+
+    if (
+      !sendToBackend({
+        type: "map_reverse_geocode",
+        lat,
+        lon,
+      })
+    ) {
+      setStatus("Not connected -- can't identify this location.");
+    }
+  }
+
+  function handleSearchResult(data) {
+    const text = String(data?.text || "").trim();
+    setStatus(text || (data?.error ? "Search failed." : "MAP ONLINE"));
+  }
+
+  function handleReverseGeocodeResult(data) {
+    const marker = data?.marker;
+
+    if (!marker || marker.error) {
+      setStatus(marker?.error || "Could not identify this location.");
+      return;
+    }
+
+    ensureUI();
+    revealMapWidget();
+
+    /*
+     * Add without clearing existing pins (replace: false) -- a "what's
+     * here" click augments the current results rather than replacing
+     * a prior search. Reuses setMarkers' existing rendering pipeline
+     * (popup, click handling, results-list entry) rather than
+     * duplicating marker-creation logic here.
+     */
+    setMarkers({
+      markers: [marker],
+      replace: false,
+    });
+
+    /*
+     * setMarkers doesn't return the marker it just created, so look it
+     * back up by the same id formula it uses internally, to get the
+     * .layer reference focusMarker() needs to open the popup.
+     */
+    const id =
+      marker.id ||
+      `${Number(marker.lat)}:${Number(marker.lon)}:${marker.name || "place"}`;
+
+    const stored = markers.get(id);
+
+    if (stored) {
+      focusMarker(stored);
+    }
+
+    setStatus("MAP ONLINE");
+  }
+
   function handleAction(payload) {
     if (!payload?.action) {
       return;
@@ -1502,6 +1653,10 @@
     getContext,
 
     handleAction,
+
+    handleSearchResult,
+
+    handleReverseGeocodeResult,
 
     clear:
       clearMarkers,

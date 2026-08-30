@@ -112,6 +112,80 @@ def _reverse_geocode(lat: float, lon: float) -> dict:
     }
 
 
+def reverse_geocode_place(lat: float, lon: float) -> dict:
+    """Reverse-geocode a single map coordinate into a marker-shaped dict
+    for the HUD's "click anywhere on the map" feature.
+
+    Distinct from _reverse_geocode() above -- that one only extracts
+    city/region/country for use in Jarvis's own "where are you" location
+    context, and its return shape reflects that narrow purpose. This one
+    is for a person clicking an arbitrary point on the HUD map and
+    wanting to see what's there, so it returns the same marker shape
+    ui/hud/static/map_agent.js's showDetails()/focusMarker() already
+    render for Overpass-sourced markers (tools/nearby.py's
+    _build_marker) -- name, address, type, lat, lon -- so the frontend
+    needs no separate rendering path for a reverse-geocode result.
+
+    Nominatim's reverse endpoint describes an address, not a business,
+    so website/phone/opening_hours/cuisine are typically unavailable
+    here even when they would be for the same spot via an Overpass POI
+    search -- the marker shape includes those keys as None rather than
+    omitting them, since the frontend already renders each field only
+    if truthy.
+    """
+    try:
+        response = request_with_retry(
+            "GET",
+            NOMINATIM_REVERSE_URL,
+            params={
+                "lat": lat,
+                "lon": lon,
+                "format": "jsonv2",
+                "addressdetails": 1,
+            },
+            headers=NOMINATIM_HEADERS,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        data = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        return {"error": f"Could not identify this location: {exc}"}
+
+    if not data or "error" in data:
+        return {"error": "No address found for this location."}
+
+    address = data.get("address", {})
+
+    name = (
+        data.get("name")
+        or address.get("amenity")
+        or address.get("shop")
+        or address.get("building")
+        or address.get("road")
+        or data.get("display_name", "").split(",")[0]
+        or "Selected location"
+    )
+
+    place_type = (
+        data.get("type")
+        or data.get("class")
+        or ""
+    ).replace("_", " ")
+
+    return {
+        "name": name,
+        "address": data.get("display_name"),
+        "type": place_type,
+        "category": place_type,
+        "website": None,
+        "phone": None,
+        "opening_hours": None,
+        "cuisine": None,
+        "distance_km": None,
+        "lat": float(lat),
+        "lon": float(lon),
+    }
+
+
 def _windows_coordinates() -> dict:
     """Run the WinRT Geolocation query (which is natively async) on its
     own dedicated thread with its own event loop, rather than calling

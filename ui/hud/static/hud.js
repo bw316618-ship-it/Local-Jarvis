@@ -890,6 +890,14 @@ function connect() {
         window.JarvisMap?.handleAction?.(data);
         break;
 
+      case "map_search_result":
+        window.JarvisMap?.handleSearchResult?.(data);
+        break;
+
+      case "map_reverse_geocode_result":
+        window.JarvisMap?.handleReverseGeocodeResult?.(data);
+        break;
+
       default:
         break;
     }

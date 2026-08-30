@@ -30,7 +30,9 @@ from pathlib import Path
 
 from config import CONFIG
 from tools.diagnostics import system_status_snapshot
+from tools.location import reverse_geocode_place
 from tools.map_hud import drain_map_actions
+from tools.nearby import find_nearby_place
 
 STATIC_DIR = Path(__file__).resolve().parent / "hud" / "static"
 TRUST_DB = Path(__file__).resolve().parent / "jarvis_hud_devices.json"
@@ -996,6 +998,41 @@ class HUDBridge:
 
             return
 
+        if msg_type == "map_search":
+            query = (
+                data.get("query")
+                or ""
+            ).strip()
+
+            if not query:
+                return
+
+            threading.Thread(
+                target=self._handle_map_search,
+                args=(
+                    query,
+                    data.get("radius_km"),
+                ),
+                daemon=True,
+            ).start()
+
+            return
+
+        if msg_type == "map_reverse_geocode":
+            try:
+                lat = float(data.get("lat"))
+                lon = float(data.get("lon"))
+            except (TypeError, ValueError):
+                return
+
+            threading.Thread(
+                target=self._handle_map_reverse_geocode,
+                args=(lat, lon),
+                daemon=True,
+            ).start()
+
+            return
+
         if msg_type == "confirm_response":
             request_id = data.get(
                 "id"
@@ -1198,6 +1235,66 @@ class HUDBridge:
                             "reply_done",
                     }
                 )
+
+    def _handle_map_search(
+        self,
+        query,
+        radius_km=None,
+    ):
+        try:
+            summary = find_nearby_place(
+                query,
+                radius_km,
+            )
+
+            for action in drain_map_actions():
+                self._broadcast(
+                    {
+                        "type": "map_action",
+                        **action,
+                    }
+                )
+
+            self._broadcast(
+                {
+                    "type": "map_search_result",
+                    "query": query,
+                    "text": summary,
+                }
+            )
+
+        except Exception as e:
+            self._broadcast(
+                {
+                    "type": "map_search_result",
+                    "query": query,
+                    "text": f"Search failed: {e}",
+                    "error": True,
+                }
+            )
+
+    def _handle_map_reverse_geocode(
+        self,
+        lat,
+        lon,
+    ):
+        try:
+            marker = reverse_geocode_place(
+                lat,
+                lon,
+            )
+
+        except Exception as e:
+            marker = {
+                "error": f"Could not identify this location: {e}",
+            }
+
+        self._broadcast(
+            {
+                "type": "map_reverse_geocode_result",
+                "marker": marker,
+            }
+        )
 
     def _tool_name_from_step(
         self,
