@@ -1,5 +1,6 @@
 import ctypes
 import ctypes.wintypes as wintypes
+import math
 import threading
 import time
 from datetime import datetime
@@ -85,6 +86,15 @@ class BLENDFUNCTION(ctypes.Structure):
         ("BlendFlags", wintypes.BYTE),
         ("SourceConstantAlpha", wintypes.BYTE),
         ("AlphaFormat", wintypes.BYTE),
+    ]
+
+
+class RECT(ctypes.Structure):
+    _fields_ = [
+        ("left", wintypes.LONG),
+        ("top", wintypes.LONG),
+        ("right", wintypes.LONG),
+        ("bottom", wintypes.LONG),
     ]
 
 
@@ -272,6 +282,12 @@ kernel32.GetLastError.restype = wintypes.DWORD
 kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 
+user32.GetWindowRect.argtypes = [
+    wintypes.HWND,
+    ctypes.POINTER(RECT),
+]
+user32.GetWindowRect.restype = wintypes.BOOL
+
 
 class NativeOverlay:
     WIDTH = 360
@@ -303,7 +319,15 @@ class NativeOverlay:
         self._collapsed = False
         self._visible = True
 
-        self._dragging = False
+        # None means "use the auto-anchored top-right corner" (see
+        # _position()). Once the user drags the window, this holds
+        # the real on-screen (x, y) so subsequent repaints don't
+        # silently snap it back to the anchor -- which is exactly
+        # what was happening before: _position() was being
+        # recomputed from scratch on every single repaint (including
+        # the once-a-second status tick), with no memory of anywhere
+        # the user had moved it.
+        self._custom_position = None
 
         self._status_lock = threading.Lock()
         self._latest_status = {
@@ -404,6 +428,9 @@ class NativeOverlay:
         return self.WIDTH, self.HEIGHT
 
     def _position(self):
+        if self._custom_position is not None:
+            return self._custom_position
+
         screen_width, _ = self._screen_geometry()
 
         width, _ = self._window_size()
@@ -451,62 +478,138 @@ class NativeOverlay:
 
         draw = ImageDraw.Draw(image)
 
+        # A single continuous rotation phase, shared by both draw
+        # calls below, so the icon's spin stays consistent whether
+        # it's being drawn as the whole collapsed window or as the
+        # small status indicator in the corner of the expanded panel.
+        # Driven by wall-clock time rather than a per-render counter
+        # so its speed doesn't change when extra renders happen (e.g.
+        # right after a collapse/expand click) on top of the regular
+        # 1-second timer tick.
+        rotation = (time.time() * 6) % 360
+
         if self._collapsed:
-            self._draw_dot(
+            self._draw_reactor_icon(
                 draw,
-                width,
-                height,
+                width // 2,
+                height // 2,
+                rotation,
             )
         else:
             self._draw_panel(
                 draw,
                 width,
                 height,
+                rotation,
             )
 
         self._update_layered_window(
             image
         )
 
-    def _draw_dot(self, draw, width, height):
-        cx = width // 2
-        cy = height // 2
+    def _draw_reactor_icon(self, draw, cx, cy, rotation):
+        """
+        A miniature arc-reactor-style icon -- soft glow, a thin
+        containment ring, four rotating spike triangles, and a
+        white-hot core -- used both as the panel's small status
+        indicator and as the overlay's entire visual identity when
+        collapsed. Replaces the earlier flat dot to match the app's
+        existing Iron-Man/reactor aesthetic (see the HUD's own
+        Three.js reactor visualization).
 
-        radius = 4
+        The first version of this used thin 1px semi-transparent
+        rays, which at this icon's actual on-screen size (~20px)
+        were too faint to read as anything but a plain circle --
+        solid triangular spikes plus a stroked ring read clearly even
+        this small.
+        """
+        color = self.CYAN
+
+        # Soft outer glow: PIL's ImageDraw has no built-in radial
+        # gradient fill, so this fakes one with a couple of
+        # concentric, decreasing-alpha circles.
+        for radius, alpha in ((12, 40), (9, 70)):
+            draw.ellipse(
+                (
+                    cx - radius,
+                    cy - radius,
+                    cx + radius,
+                    cy + radius,
+                ),
+                fill=(color[0], color[1], color[2], alpha),
+            )
+
+        # Containment ring -- an outline, not a fill, so it reads as
+        # a ring rather than another solid disc.
+        ring_radius = 9
 
         draw.ellipse(
             (
-                cx - radius,
-                cy - radius,
-                cx + radius,
-                cy + radius,
+                cx - ring_radius,
+                cy - ring_radius,
+                cx + ring_radius,
+                cy + ring_radius,
             ),
-            fill=self.CYAN,
+            outline=color,
+            width=1,
         )
 
-        glow = 9
+        # Spikes: solid triangles radiating outward from the ring,
+        # evenly spaced, slowly rotating (see `rotation` in
+        # _render()). Filled triangles instead of thin lines so
+        # they're actually visible at this icon's small size.
+        spike_count = 4
+        spike_length = 5
+        spike_half_width = 2
+
+        for i in range(spike_count):
+            angle = math.radians(
+                rotation + (360 / spike_count) * i
+            )
+            perpendicular = angle + (math.pi / 2)
+
+            base_x = cx + ring_radius * math.cos(angle)
+            base_y = cy + ring_radius * math.sin(angle)
+
+            tip_x = cx + (
+                ring_radius + spike_length
+            ) * math.cos(angle)
+            tip_y = cy + (
+                ring_radius + spike_length
+            ) * math.sin(angle)
+
+            side1 = (
+                base_x
+                + spike_half_width * math.cos(perpendicular),
+                base_y
+                + spike_half_width * math.sin(perpendicular),
+            )
+            side2 = (
+                base_x
+                - spike_half_width * math.cos(perpendicular),
+                base_y
+                - spike_half_width * math.sin(perpendicular),
+            )
+
+            draw.polygon(
+                [(tip_x, tip_y), side1, side2],
+                fill=color,
+            )
+
+        # White-hot core, drawn last so it sits on top of everything.
+        core_radius = 3
 
         draw.ellipse(
             (
-                cx - glow,
-                cy - glow,
-                cx + glow,
-                cy + glow,
+                cx - core_radius,
+                cy - core_radius,
+                cx + core_radius,
+                cy + core_radius,
             ),
-            fill=(58, 214, 255, 35),
+            fill=(255, 255, 255, 255),
         )
 
-        draw.ellipse(
-            (
-                cx - radius,
-                cy - radius,
-                cx + radius,
-                cy + radius,
-            ),
-            fill=self.CYAN,
-        )
-
-    def _draw_panel(self, draw, width, height):
+    def _draw_panel(self, draw, width, height, rotation):
         radius = 10
 
         bg = (
@@ -620,10 +723,11 @@ class NativeOverlay:
                 fill=self.TEXT,
             )
 
-        self._draw_dot(
+        self._draw_reactor_icon(
             draw,
             width - 21,
             19,
+            rotation,
         )
 
     def _format_status(self, value):
@@ -813,6 +917,56 @@ class NativeOverlay:
             screen_dc,
         )
 
+    def _drag_and_maybe_toggle(self, hwnd, is_icon_click):
+        """
+        Hands off to Windows' own window-move loop -- the standard
+        trick for dragging a frameless window is faking a click on a
+        title bar it doesn't actually have (WM_NCLBUTTONDOWN with
+        HTCAPTION). That call blocks until the mouse is released
+        regardless of whether the user actually moved it, so a
+        before/after GetWindowRect comparison is what distinguishes a
+        real drag from a stationary click here -- there's no other
+        signal available from a single blocking call like this one.
+
+        A drag updates _custom_position so future repaints keep the
+        window where the user put it. A stationary click on the icon
+        toggles collapsed/expanded, same as before; a stationary
+        click elsewhere in the panel body does nothing, unchanged.
+        """
+        start_rect = RECT()
+        user32.GetWindowRect(
+            hwnd,
+            ctypes.byref(start_rect),
+        )
+
+        user32.ReleaseCapture()
+
+        user32.SendMessageW(
+            hwnd,
+            0x00A1,
+            HTCAPTION,
+            0,
+        )
+
+        end_rect = RECT()
+        user32.GetWindowRect(
+            hwnd,
+            ctypes.byref(end_rect),
+        )
+
+        moved = (
+            abs(end_rect.left - start_rect.left) > 2
+            or abs(end_rect.top - start_rect.top) > 2
+        )
+
+        if moved:
+            self._custom_position = (
+                end_rect.left,
+                end_rect.top,
+            )
+        elif is_icon_click:
+            self.toggle_collapsed()
+
     def _window_proc(
         self,
         hwnd,
@@ -830,24 +984,14 @@ class NativeOverlay:
             x = lparam & 0xFFFF
             y = (lparam >> 16) & 0xFFFF
 
-            if self._collapsed:
-                self.toggle_collapsed()
-                return 0
-
-            if (
+            is_icon = self._collapsed or (
                 x >= self.WIDTH - 40
                 and y <= 40
-            ):
-                self.toggle_collapsed()
-                return 0
+            )
 
-            user32.ReleaseCapture()
-
-            user32.SendMessageW(
+            self._drag_and_maybe_toggle(
                 hwnd,
-                0x00A1,
-                HTCAPTION,
-                0,
+                is_icon,
             )
 
             return 0
