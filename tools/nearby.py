@@ -1,34 +1,38 @@
 """
 Nearby point-of-interest search for Jarvis using OpenStreetMap Overpass.
 
-Nearby searches also publish their results to the HUD map so that a request
-such as "mark nearby cafes" both returns the places to Jarvis and visually
-pins them on the map.
+Nearby searches also publish their results to the HUD map.
 
-find_nearby_place is the ONLY Overpass-search tool exposed to the model.
-tools/map_hud.py used to have a second, near-identical search_map_places
-tool (its own CATEGORY_TAGS, its own query builder, its own haversine
-distance) that only pinned the map and returned no summary text -- that
-duplication made it ambiguous which tool the model would pick for a
-"find X near me" request, and picking the map_hud one meant the user got
-no readable answer. That tool has been removed; map_hud.py now only
-owns the map-only actions (clear/focus) that this module doesn't cover.
-
-Read-only.
+The Overpass client uses multiple public instances and fails over between
+them when one is rate-limited, overloaded, or temporarily unavailable.
 """
 
 import math
+import threading
+import time
 
 import requests
 
 from tools.location import get_coordinates
 from tools.map_hud import _queue_action
-from tools.net import request_with_retry
 
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Public Overpass instances. Private.coffee is the preferred endpoint;
+# the main FOSSGISS instance is kept as a last-resort fallback because
+# it is currently the endpoint most likely to return HTTP 429.
+OVERPASS_URLS = (
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.nchc.org.tw/api/interpreter",
+)
 
-REQUEST_TIMEOUT_SECONDS = 20
+# Keep the server-side query timeout and HTTP timeout aligned. The old
+# implementation spent 20 seconds on each endpoint and could therefore
+# block for more than a minute when public Overpass instances were busy.
+REQUEST_TIMEOUT_SECONDS = 15
+NETWORK_RETRIES_PER_ENDPOINT = 0
+OVERPASS_COOLDOWN_SECONDS = 30.0
+OVERPASS_MIN_INTERVAL_SECONDS = 1.0
 
 OVERPASS_HEADERS = {
     "User-Agent": "Local-Jarvis/1.0 (personal local-first AI assistant)",
@@ -39,6 +43,11 @@ DEFAULT_RADIUS_KM = 5.0
 MAX_RESULTS = 30
 MAX_RADIUS_KM = 25.0
 
+_endpoint_lock = threading.Lock()
+_endpoint_cooldowns = {}
+_last_request_at = 0.0
+_preferred_endpoint_index = 0
+
 
 CATEGORY_TAGS = {
     "metro station": [
@@ -46,102 +55,78 @@ CATEGORY_TAGS = {
         ("station", "subway"),
         ("railway", "subway_entrance"),
     ],
-
     "subway station": [
         ("railway", "station"),
         ("station", "subway"),
         ("railway", "subway_entrance"),
     ],
-
     "train station": [
         ("railway", "station"),
     ],
-
     "bus stop": [
         ("highway", "bus_stop"),
     ],
-
     "pharmacy": [
         ("amenity", "pharmacy"),
     ],
-
     "hospital": [
         ("amenity", "hospital"),
     ],
-
     "gas station": [
         ("amenity", "fuel"),
     ],
-
     "petrol station": [
         ("amenity", "fuel"),
     ],
-
     "atm": [
         ("amenity", "atm"),
     ],
-
     "bank": [
         ("amenity", "bank"),
     ],
-
     "supermarket": [
         ("shop", "supermarket"),
     ],
-
     "grocery store": [
         ("shop", "supermarket"),
         ("shop", "convenience"),
     ],
-
     "restaurant": [
         ("amenity", "restaurant"),
     ],
-
     "cafe": [
         ("amenity", "cafe"),
     ],
-
     "cafes": [
         ("amenity", "cafe"),
     ],
-
     "coffee shop": [
         ("amenity", "cafe"),
     ],
-
     "coffee shops": [
         ("amenity", "cafe"),
     ],
-
     "parking": [
         ("amenity", "parking"),
     ],
-
     "hotel": [
         ("tourism", "hotel"),
     ],
-
     "post office": [
         ("amenity", "post_office"),
     ],
-
     "library": [
         ("amenity", "library"),
     ],
-
     "park": [
         ("leisure", "park"),
     ],
-
     "museum": [
         ("tourism", "museum"),
     ],
-
     "gallery": [
         ("tourism", "gallery"),
     ],
-
     "attraction": [
         ("tourism", "attraction"),
         ("tourism", "museum"),
@@ -154,7 +139,6 @@ CATEGORY_TAGS = {
         ("historic", "archaeological_site"),
         ("leisure", "park"),
     ],
-
     "attractions": [
         ("tourism", "attraction"),
         ("tourism", "museum"),
@@ -167,7 +151,6 @@ CATEGORY_TAGS = {
         ("historic", "archaeological_site"),
         ("leisure", "park"),
     ],
-
     "tourist attraction": [
         ("tourism", "attraction"),
         ("tourism", "museum"),
@@ -180,7 +163,6 @@ CATEGORY_TAGS = {
         ("historic", "archaeological_site"),
         ("leisure", "park"),
     ],
-
     "tourist attractions": [
         ("tourism", "attraction"),
         ("tourism", "museum"),
@@ -213,7 +195,7 @@ def _haversine_km(lat1, lon1, lat2, lon2):
     )
 
     return 2 * earth_radius_km * math.asin(
-        math.sqrt(a)
+        math.sqrt(max(0.0, min(1.0, a)))
     )
 
 
@@ -224,25 +206,23 @@ def _build_query(
     tag_filters,
     free_text,
 ):
+    """
+    Build a deliberately small Overpass query.
+
+    The old version emitted three separate clauses (node, way, relation)
+    for every tag. For a simple cafe search that was already three
+    searches; attraction searches expanded into dozens of independent
+    searches. `nwr` expresses the same request as one selector and is
+    substantially cheaper for public Overpass instances.
+    """
     clauses = []
 
     if tag_filters:
         for key, value in tag_filters:
             clauses.append(
-                f'node["{key}"="{value}"]'
+                f'nwr["{key}"="{value}"]'
                 f'(around:{radius_m},{lat},{lon});'
             )
-
-            clauses.append(
-                f'way["{key}"="{value}"]'
-                f'(around:{radius_m},{lat},{lon});'
-            )
-
-            clauses.append(
-                f'relation["{key}"="{value}"]'
-                f'(around:{radius_m},{lat},{lon});'
-            )
-
     else:
         escaped = (
             free_text
@@ -251,10 +231,200 @@ def _build_query(
         )
 
         clauses.append(
-            f'node["name"~"{escaped}",i]'
+            f'nwr["name"~"{escaped}",i]'
             f'(around:{radius_m},{lat},{lon});'
         )
 
+    return (
+        f"[out:json][timeout:{REQUEST_TIMEOUT_SECONDS}];\n"
+        "(\n  "
+        + "\n  ".join(clauses)
+        + "\n);\n"
+        "out center;"
+    )
+
+
+def _retry_after_seconds(response):
+    value = response.headers.get("Retry-After")
+
+    if not value:
+        return 0.0
+
+    try:
+        return max(0.0, min(float(value), 30.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _mark_endpoint_cooldown(index, seconds=OVERPASS_COOLDOWN_SECONDS):
+    with _endpoint_lock:
+        _endpoint_cooldowns[index] = time.monotonic() + seconds
+
+
+def _wait_for_global_interval():
+    global _last_request_at
+
+    with _endpoint_lock:
+        now = time.monotonic()
+        wait = (
+            OVERPASS_MIN_INTERVAL_SECONDS
+            - (now - _last_request_at)
+        )
+
+        if wait > 0:
+            time.sleep(wait)
+
+        _last_request_at = time.monotonic()
+
+
+def _endpoint_order():
+    with _endpoint_lock:
+        preferred = _preferred_endpoint_index
+
+    return [
+        (preferred + offset) % len(OVERPASS_URLS)
+        for offset in range(len(OVERPASS_URLS))
+    ]
+
+
+def _request_overpass(query):
+    """
+    Query Overpass with endpoint failover.
+
+    429 is NOT retried against the same server. The endpoint is cooled
+    down and the next public instance is tried instead. Network failures
+    and 5xx responses also move to the next endpoint after one retry.
+    """
+
+    global _preferred_endpoint_index
+
+    errors = []
+
+    for index in _endpoint_order():
+        url = OVERPASS_URLS[index]
+
+        with _endpoint_lock:
+            cooldown_until = _endpoint_cooldowns.get(index, 0.0)
+
+        if cooldown_until > time.monotonic():
+            remaining = cooldown_until - time.monotonic()
+            errors.append(
+                f"{url}: cooling down ({remaining:.0f}s)"
+            )
+            continue
+
+        endpoint_failed = False
+
+        for attempt in range(NETWORK_RETRIES_PER_ENDPOINT + 1):
+            try:
+                _wait_for_global_interval()
+
+                response = requests.post(
+                    url,
+                    data={"data": query},
+                    headers=OVERPASS_HEADERS,
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+
+                status = response.status_code
+
+                if status == 429:
+                    retry_after = _retry_after_seconds(response)
+                    _mark_endpoint_cooldown(
+                        index,
+                        max(
+                            OVERPASS_COOLDOWN_SECONDS,
+                            retry_after,
+                        ),
+                    )
+
+                    errors.append(
+                        f"{url}: HTTP 429 rate limited"
+                    )
+                    endpoint_failed = True
+                    break
+
+                if status in {500, 502, 503, 504}:
+                    _mark_endpoint_cooldown(index, 30.0)
+                    errors.append(
+                        f"{url}: HTTP {status}"
+                    )
+                    endpoint_failed = True
+                    break
+
+                response.raise_for_status()
+
+                data = response.json()
+
+                if not isinstance(data, dict):
+                    raise ValueError(
+                        "Overpass returned a non-object JSON response."
+                    )
+
+                with _endpoint_lock:
+                    _preferred_endpoint_index = index
+
+                return data
+
+            except requests.RequestException as exc:
+                errors.append(
+                    f"{url}: {exc}"
+                )
+
+                if attempt < NETWORK_RETRIES_PER_ENDPOINT:
+                    time.sleep(0.5 * (attempt + 1))
+                    continue
+
+                _mark_endpoint_cooldown(index, 10.0)
+                endpoint_failed = True
+                break
+
+            except ValueError as exc:
+                errors.append(
+                    f"{url}: {exc}"
+                )
+                endpoint_failed = True
+                break
+
+        if not endpoint_failed:
+            break
+
+    raise RuntimeError(
+        "All Overpass endpoints failed. "
+        + " | ".join(errors)
+    )
+
+
+def _reduced_query(lat, lon, radius_m, tag_filters, free_text):
+    """
+    Second-pass query used after a timeout.
+
+    It keeps only nodes and ways. Relations are uncommon for the POIs
+    Jarvis displays and are disproportionately expensive on overloaded
+    public instances.
+    """
+    clauses = []
+
+    if tag_filters:
+        for key, value in tag_filters:
+            clauses.append(
+                f'node["{key}"="{value}"]'
+                f'(around:{radius_m},{lat},{lon});'
+            )
+            clauses.append(
+                f'way["{key}"="{value}"]'
+                f'(around:{radius_m},{lat},{lon});'
+            )
+    else:
+        escaped = (
+            free_text
+            .replace("\\", "\\\\")
+            .replace('"', '\\"')
+        )
+        clauses.append(
+            f'node["name"~"{escaped}",i]'
+            f'(around:{radius_m},{lat},{lon});'
+        )
         clauses.append(
             f'way["name"~"{escaped}",i]'
             f'(around:{radius_m},{lat},{lon});'
@@ -271,7 +441,6 @@ def _build_query(
 
 def _build_marker(element, here, category):
     tags = element.get("tags") or {}
-
     name = tags.get("name")
 
     if not name:
@@ -280,12 +449,10 @@ def _build_marker(element, here, category):
     center = element.get("center") or {}
 
     lat = element.get("lat")
-
     if lat is None:
         lat = center.get("lat")
 
     lon = element.get("lon")
-
     if lon is None:
         lon = center.get("lon")
 
@@ -303,9 +470,7 @@ def _build_marker(element, here, category):
     ]
 
     address = ", ".join(
-        part
-        for part in address_parts
-        if part
+        part for part in address_parts if part
     )
 
     place_type = (
@@ -323,46 +488,30 @@ def _build_marker(element, here, category):
             f"{element.get('type', 'place')}-"
             f"{element.get('id', '0')}"
         ),
-
         "name": name,
-
         "lat": lat,
         "lon": lon,
-
         "distance_km": _haversine_km(
             here["lat"],
             here["lon"],
             lat,
             lon,
         ),
-
         "category": category,
-
         "type": place_type,
-
         "address": address,
-
-        "opening_hours": tags.get(
-            "opening_hours",
-            "",
-        ),
-
+        "opening_hours": tags.get("opening_hours", ""),
         "phone": (
             tags.get("phone")
             or tags.get("contact:phone")
             or ""
         ),
-
         "website": (
             tags.get("website")
             or tags.get("contact:website")
             or ""
         ),
-
-        "cuisine": tags.get(
-            "cuisine",
-            "",
-        ),
+        "cuisine": tags.get("cuisine", ""),
     }
 
 
@@ -402,16 +551,8 @@ def _publish_markers(
     here,
     markers,
 ):
-    """
-    Send the same nearby results to the HUD map.
-
-    This is the missing connection between the normal nearby tool
-    and the graphical map.
-    """
-
     _queue_action(
         "set_markers",
-
         query={
             "category": category,
             "radius_km": radius_km,
@@ -420,9 +561,7 @@ def _publish_markers(
                 "lon": here["lon"],
             },
         },
-
         markers=markers,
-
         replace=True,
     )
 
@@ -434,9 +573,7 @@ def find_nearby_place(
     """
     Find nearby places matching a category.
 
-    The result is both:
-      1. returned to Jarvis as text
-      2. published as map markers to the HUD
+    Results are both returned as text and published to the HUD map.
     """
 
     category_key = (
@@ -459,22 +596,18 @@ def find_nearby_place(
                 MAX_RADIUS_KM,
             ),
         )
-
     except (TypeError, ValueError):
         radius_km = DEFAULT_RADIUS_KM
 
     try:
         here = get_coordinates()
-
     except RuntimeError as exc:
         return (
             "Could not determine current "
             f"location:\n{exc}"
         )
 
-    tag_filters = CATEGORY_TAGS.get(
-        category_key
-    )
+    tag_filters = CATEGORY_TAGS.get(category_key)
 
     query = _build_query(
         here["lat"],
@@ -485,36 +618,40 @@ def find_nearby_place(
     )
 
     try:
-        response = request_with_retry(
-            "POST",
-            OVERPASS_URL,
-            data={
-                "data": query,
-            },
-            headers=OVERPASS_HEADERS,
-            timeout=REQUEST_TIMEOUT_SECONDS,
-        )
+        data = _request_overpass(query)
 
-        data = response.json()
+    except RuntimeError as first_error:
+        # A busy Overpass server can still time out on a broad query.
+        # Retry once with a cheaper nodes/ways-only query and a smaller
+        # radius before reporting failure.
+        reduced_radius_km = min(radius_km, 2.0)
 
-    except requests.RequestException as exc:
-        return (
-            "Nearby-place search failed: "
-            f"{exc}"
-        )
+        if reduced_radius_km < radius_km:
+            reduced_query = _reduced_query(
+                here["lat"],
+                here["lon"],
+                int(reduced_radius_km * 1000),
+                tag_filters,
+                category_key,
+            )
 
-    except ValueError:
-        return (
-            "Nearby-place search failed: "
-            "invalid JSON from Overpass."
-        )
+            try:
+                data = _request_overpass(reduced_query)
+            except RuntimeError as second_error:
+                return (
+                    "Nearby-place search failed. "
+                    f"Primary search: {first_error}. "
+                    f"Reduced search: {second_error}"
+                )
+        else:
+            return (
+                "Nearby-place search failed: "
+                f"{first_error}"
+            )
 
     results = []
 
-    for element in data.get(
-        "elements",
-        [],
-    ):
+    for element in data.get("elements", []):
         marker = _build_marker(
             element,
             here,
@@ -534,13 +671,6 @@ def find_nearby_place(
         )
 
     markers = results[:MAX_RESULTS]
-
-    # ------------------------------------------------------------
-    # THIS IS THE IMPORTANT PART.
-    #
-    # Previously find_nearby_place() stopped after producing text.
-    # Now the same results are pushed into the HUD map queue.
-    # ------------------------------------------------------------
 
     _publish_markers(
         category=category_key,
@@ -582,10 +712,8 @@ def find_nearby_place(
 NEARBY_TOOL_SCHEMAS = [
     {
         "type": "function",
-
         "function": {
             "name": "find_nearby_place",
-
             "description": (
                 "MANDATORY TOOL for nearby-location requests. "
                 "Use this whenever the user asks for nearby, "
@@ -599,24 +727,19 @@ NEARBY_TOOL_SCHEMAS = [
                 "the HUD map, which opens automatically if "
                 "it wasn't already."
             ),
-
             "parameters": {
                 "type": "object",
-
                 "properties": {
                     "category": {
                         "type": "string",
-
                         "description": (
                             "Place type, e.g. 'cafe', "
                             "'restaurant', 'metro station', "
                             "or 'tourist attractions'."
                         ),
                     },
-
                     "radius_km": {
                         "type": "number",
-
                         "description": (
                             "Search radius in kilometers; "
                             "defaults to 5 and is capped "
@@ -624,7 +747,6 @@ NEARBY_TOOL_SCHEMAS = [
                         ),
                     },
                 },
-
                 "required": [
                     "category",
                 ],

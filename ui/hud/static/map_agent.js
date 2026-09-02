@@ -14,24 +14,17 @@
   let userLocation = null;
   let expanded = false;
   let initialized = false;
+  let watchId = null;
 
   const markers = new Map();
 
   const createElement = (tag, attributes = {}, text = "") => {
     const node = document.createElement(tag);
-
     Object.entries(attributes).forEach(([key, value]) => {
-      if (key === "class") {
-        node.className = value;
-      } else {
-        node.setAttribute(key, value);
-      }
+      if (key === "class") node.className = value;
+      else node.setAttribute(key, value);
     });
-
-    if (text) {
-      node.textContent = text;
-    }
-
+    if (text) node.textContent = text;
     return node;
   };
 
@@ -43,13 +36,81 @@
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
 
-  const formatDistance = (distance) => {
-    if (!Number.isFinite(Number(distance))) {
-      return "";
+  const haversineKm = (aLat, aLon, bLat, bLon) => {
+    const lat1 = Number(aLat);
+    const lon1 = Number(aLon);
+    const lat2 = Number(bLat);
+    const lon2 = Number(bLon);
+
+    if (![lat1, lon1, lat2, lon2].every(Number.isFinite)) return null;
+
+    const rad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * rad;
+    const dLon = (lon2 - lon1) * rad;
+    const x =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * rad) *
+        Math.cos(lat2 * rad) *
+        Math.sin(dLon / 2) ** 2;
+
+    return 6371 * 2 * Math.asin(Math.sqrt(Math.min(1, x)));
+  };
+
+  const distanceFor = (marker) =>
+    haversineKm(
+      userLocation?.lat,
+      userLocation?.lon,
+      marker?.lat,
+      marker?.lon
+    );
+
+  const normalizeMarker = (marker) => {
+    const lat = Number(marker?.lat);
+    const lon = Number(marker?.lon);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+    const normalized = {
+      ...marker,
+      lat,
+      lon,
+    };
+
+    const calculated = distanceFor(normalized);
+
+    if (calculated !== null) {
+      normalized.distance_km = calculated;
+    } else if (!Number.isFinite(Number(normalized.distance_km))) {
+      normalized.distance_km = null;
     }
 
-    const km = Number(distance);
+    normalized.id =
+      marker.id ||
+      `${lat}:${lon}:${String(marker.name || "place").trim()}`;
 
+    return normalized;
+  };
+
+  const formatDistance = (distance) => {
+    /*
+     * Number(null) is 0, not NaN, so Number.isFinite(Number(null)) is
+     * true -- a plain finite-check alone doesn't actually filter out a
+     * missing distance. This regressed when normalizeMarker's
+     * client-side haversine calculation was added: distanceFor()
+     * legitimately returns null whenever userLocation isn't available
+     * yet (geolocation permission not granted, not resolved yet, or an
+     * insecure/non-localhost context where navigator.geolocation is
+     * unavailable at all), and normalizeMarker passes that null
+     * straight through when the marker's own backend-provided
+     * distance_km also isn't a valid number -- which is always the
+     * case for a reverse-geocoded map click, since Nominatim reverse
+     * geocoding has no "distance from the user" concept at all. Without
+     * this guard, every such marker silently displayed "0 m" instead of
+     * omitting the distance.
+     */
+    if (distance === null || distance === undefined) return "Distance unavailable";
+    if (!Number.isFinite(Number(distance))) return "Distance unavailable";
+    const km = Number(distance);
     return km < 1
       ? `${Math.round(km * 1000)} m`
       : `${km.toFixed(2)} km`;
@@ -57,19 +118,11 @@
 
   const normalizeUrl = (value) => {
     const raw = String(value || "").trim();
-
-    if (!raw) {
-      return "";
-    }
+    if (!raw) return "";
 
     try {
       const url = new URL(raw, window.location.href);
-
-      if (!["http:", "https:"].includes(url.protocol)) {
-        return "";
-      }
-
-      return url.href;
+      return ["http:", "https:"].includes(url.protocol) ? url.href : "";
     } catch {
       return "";
     }
@@ -77,21 +130,9 @@
 
   function setStatus(text) {
     const node = document.getElementById("jarvisMapStatus");
-
-    if (node) {
-      node.textContent = text;
-    }
+    if (node) node.textContent = text;
   }
 
-  /*
-   * Send a message to the backend over the same authenticated socket
-   * hud.js uses for chat -- window.JarvisSocket is the raw WebSocket
-   * instance hud.js exposes as soon as a connection opens (see
-   * hud.js's connect()). Guarded the same way hud.js guards its own
-   * user_message send: socket open AND this device already
-   * authenticated, so an unauthenticated or not-yet-connected tab
-   * fails quietly rather than throwing.
-   */
   function sendToBackend(payload) {
     const socket = window.JarvisSocket;
     const wrap = document.getElementById("wrap");
@@ -109,9 +150,7 @@
   }
 
   function ensureUI() {
-    if (document.getElementById("jarvisMapWidget")) {
-      return;
-    }
+    if (document.getElementById("jarvisMapWidget")) return;
 
     const toggle = createElement(
       "button",
@@ -134,9 +173,7 @@
 
     const title = createElement(
       "div",
-      {
-        class: "jarvis-map-title",
-      },
+      { class: "jarvis-map-title" },
       "JARVIS / MAP"
     );
 
@@ -173,10 +210,6 @@
       "×"
     );
 
-    /*
-     * This MUST be a div, not a canvas.
-     * Leaflet requires a DOM element as its map container.
-     */
     const mapContainer = createElement("div", {
       id: "jarvisMapCanvas",
       class: "jarvis-map-canvas",
@@ -190,7 +223,7 @@
     const searchInput = createElement("input", {
       id: "jarvisMapSearchInput",
       type: "text",
-      placeholder: "Search places, e.g. \"coffee\" or an address...",
+      placeholder: 'Search places, e.g. "coffee" or an address...',
       "aria-label": "Search the map",
       autocomplete: "off",
     });
@@ -220,15 +253,7 @@
 
     controls.append(expand, close);
     header.append(title, status, controls);
-
-    widget.append(
-      header,
-      searchForm,
-      mapContainer,
-      results,
-      details
-    );
-
+    widget.append(header, searchForm, mapContainer, results, details);
     document.body.append(toggle, widget);
 
     toggle.addEventListener("click", (event) => {
@@ -243,12 +268,8 @@
 
     close.addEventListener("click", (event) => {
       event.stopPropagation();
-
-      if (expanded) {
-        setExpanded(false);
-      } else {
-        toggleVisibility();
-      }
+      if (expanded) setExpanded(false);
+      else toggleVisibility();
     });
 
     searchForm.addEventListener("submit", (event) => {
@@ -273,110 +294,122 @@
   function revealMapWidget() {
     ensureUI();
 
-    const widget =
-      document.getElementById("jarvisMapWidget");
-
+    const widget = document.getElementById("jarvisMapWidget");
     widget?.classList.add("map-visible");
-
     localStorage.setItem(STORAGE_KEY, "1");
 
     initMap();
 
-    requestAnimationFrame(() => {
-      map?.invalidateSize();
-    });
+    requestAnimationFrame(() => map?.invalidateSize());
   }
 
   function toggleVisibility() {
     ensureUI();
 
-    const widget =
-      document.getElementById("jarvisMapWidget");
+    const widget = document.getElementById("jarvisMapWidget");
+    if (!widget) return;
 
-    if (!widget) {
-      return;
-    }
+    const visible = widget.classList.toggle("map-visible");
 
-    const visible =
-      widget.classList.toggle("map-visible");
-
-    localStorage.setItem(
-      STORAGE_KEY,
-      visible ? "1" : "0"
-    );
+    localStorage.setItem(STORAGE_KEY, visible ? "1" : "0");
 
     if (visible) {
       initMap();
-
-      requestAnimationFrame(() => {
-        map?.invalidateSize();
-      });
+      requestAnimationFrame(() => map?.invalidateSize());
     }
   }
 
   function setExpanded(value, options = {}) {
     const nextExpanded = Boolean(value);
-    const preserveView =
-      options.preserveView === true;
-
+    const preserveView = options.preserveView === true;
     const centerOnUser =
       options.centerOnUser === true ||
-      (
-        !preserveView &&
-        nextExpanded &&
-        !expanded
-      );
+      (!preserveView && nextExpanded && !expanded);
 
     expanded = nextExpanded;
-
     ensureUI();
 
-    const widget =
-      document.getElementById("jarvisMapWidget");
+    const widget = document.getElementById("jarvisMapWidget");
+    if (!widget) return;
 
-    if (!widget) {
-      return;
-    }
+    widget.classList.toggle("map-expanded", expanded);
 
-    widget.classList.toggle(
-      "map-expanded",
-      expanded
-    );
-
-    const button =
-      document.getElementById("jarvisMapExpand");
-
-    if (button) {
-      button.textContent =
-        expanded ? "PREVIEW" : "EXPAND";
-    }
+    const button = document.getElementById("jarvisMapExpand");
+    if (button) button.textContent = expanded ? "PREVIEW" : "EXPAND";
 
     initMap();
 
     requestAnimationFrame(() => {
-      if (!map) {
-        return;
-      }
+      if (!map) return;
 
       map.invalidateSize();
 
-      if (
-        expanded &&
-        centerOnUser &&
-        userLocation
-      ) {
+      if (expanded && centerOnUser && userLocation) {
         map.setView(
-          [
-            userLocation.lat,
-            userLocation.lon,
-          ],
-          Math.max(
-            map.getZoom(),
-            PREVIEW_ZOOM
-          )
+          [userLocation.lat, userLocation.lon],
+          Math.max(map.getZoom(), PREVIEW_ZOOM)
         );
       }
     });
+  }
+
+  function refreshMarkerDistances() {
+    markers.forEach((marker) => {
+      const distance = distanceFor(marker);
+      marker.distance_km = distance;
+      if (marker.layer) {
+        marker.layer.setPopupContent(popupHtml(marker));
+      }
+    });
+
+    renderResults();
+
+    const details = document.getElementById("jarvisMapDetails");
+    const selectedId = details?.dataset.markerId;
+
+    if (selectedId && markers.has(selectedId)) {
+      showDetails(markers.get(selectedId));
+    }
+  }
+
+  function updateUserVisuals() {
+    if (!map || !window.L || !userLocation) return;
+
+    const latLng = [userLocation.lat, userLocation.lon];
+
+    if (!userMarker) {
+      userMarker = L.circleMarker(latLng, {
+        radius: 7,
+        className: "jarvis-user-marker",
+        weight: 2,
+        fillOpacity: 0.9,
+      }).addTo(map);
+
+      userMarker.bindTooltip("YOU", {
+        permanent: true,
+        direction: "top",
+        offset: [0, -8],
+        className: "jarvis-user-label",
+      });
+    } else {
+      userMarker.setLatLng(latLng);
+    }
+
+    if (!accuracyCircle) {
+      accuracyCircle = L.circle(latLng, {
+        radius: userLocation.accuracy || 20,
+        className: "jarvis-accuracy",
+      }).addTo(map);
+    } else {
+      accuracyCircle.setLatLng(latLng);
+      accuracyCircle.setRadius(userLocation.accuracy || 20);
+    }
+
+    refreshMarkerDistances();
+
+    if (!expanded && markers.size === 0) {
+      map.setView(latLng, PREVIEW_ZOOM);
+    }
   }
 
   function locateUser() {
@@ -386,94 +419,19 @@
     }
 
     const success = (position) => {
-      const {
-        latitude,
-        longitude,
-        accuracy,
-      } = position.coords;
-
       userLocation = {
-        lat: latitude,
-        lon: longitude,
-        accuracy: Number.isFinite(accuracy)
-          ? accuracy
+        lat: position.coords.latitude,
+        lon: position.coords.longitude,
+        accuracy: Number.isFinite(position.coords.accuracy)
+          ? position.coords.accuracy
           : null,
       };
 
       setStatus(
-        `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
+        `${userLocation.lat.toFixed(4)}, ${userLocation.lon.toFixed(4)}`
       );
 
-      if (!map || !window.L) {
-        return;
-      }
-
-      if (!userMarker) {
-        userMarker =
-          L.circleMarker(
-            [latitude, longitude],
-            {
-              radius: 7,
-              className:
-                "jarvis-user-marker",
-              weight: 2,
-              fillOpacity: 0.9,
-            }
-          ).addTo(map);
-
-        userMarker.bindTooltip(
-          "YOU",
-          {
-            permanent: true,
-            direction: "top",
-            offset: [0, -8],
-            className:
-              "jarvis-user-label",
-          }
-        );
-      } else {
-        userMarker.setLatLng([
-          latitude,
-          longitude,
-        ]);
-      }
-
-      if (accuracyCircle) {
-        accuracyCircle.setLatLng([
-          latitude,
-          longitude,
-        ]);
-
-        accuracyCircle.setRadius(
-          accuracy || 20
-        );
-      } else {
-        accuracyCircle =
-          L.circle(
-            [latitude, longitude],
-            {
-              radius: accuracy || 20,
-              className:
-                "jarvis-accuracy",
-            }
-          ).addTo(map);
-      }
-
-      /*
-       * Only center on the user when there are no search results.
-       *
-       * This prevents the location watcher from stealing the map
-       * away from a selected cafe/restaurant/etc.
-       */
-      if (
-        !expanded &&
-        markers.size === 0
-      ) {
-        map.setView(
-          [latitude, longitude],
-          PREVIEW_ZOOM
-        );
-      }
+      updateUserVisuals();
     };
 
     navigator.geolocation.getCurrentPosition(
@@ -486,161 +444,88 @@
       }
     );
 
-    navigator.geolocation.watchPosition(
-      success,
-      () => {},
-      {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 10000,
-      }
-    );
+    if (watchId === null) {
+      watchId = navigator.geolocation.watchPosition(
+        success,
+        () => {},
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 10000,
+        }
+      );
+    }
   }
 
   function initMap() {
-    if (initialized) {
-      return;
-    }
+    if (initialized) return;
 
     if (!window.L) {
-      console.error(
-        "[Jarvis Map] Leaflet is not loaded."
-      );
-
       setStatus("MAP LIBRARY OFFLINE");
       return;
     }
 
     ensureUI();
 
-    const mapContainer =
-      document.getElementById(
-        "jarvisMapCanvas"
-      );
+    const mapContainer = document.getElementById("jarvisMapCanvas");
+    if (!mapContainer) return;
 
-    if (!mapContainer) {
-      console.error(
-        "[Jarvis Map] Map container not found."
-      );
-
-      return;
+    if (mapContainer.tagName === "CANVAS") {
+      const replacement = document.createElement("div");
+      replacement.id = "jarvisMapCanvas";
+      replacement.className = "jarvis-map-canvas";
+      mapContainer.replaceWith(replacement);
     }
 
-    /*
-     * If another implementation somehow left a canvas
-     * with this ID behind, replace it.
-     */
-    if (
-      mapContainer.tagName === "CANVAS"
-    ) {
-      const replacement =
-        document.createElement("div");
-
-      replacement.id =
-        "jarvisMapCanvas";
-
-      replacement.className =
-        "jarvis-map-canvas";
-
-      mapContainer.replaceWith(
-        replacement
-      );
-    }
-
-    const container =
-      document.getElementById(
-        "jarvisMapCanvas"
-      );
-
-    initialized = true;
+    const container = document.getElementById("jarvisMapCanvas");
 
     map = L.map(container, {
       zoomControl: true,
       worldCopyJump: true,
       minZoom: 2,
-    }).setView(
-      DEFAULT_CENTER,
-      DEFAULT_ZOOM
-    );
+    }).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
 
     L.tileLayer(
       "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       {
         maxZoom: 19,
-        attribution:
-          "&copy; OpenStreetMap contributors",
+        attribution: "&copy; OpenStreetMap contributors",
       }
     ).addTo(map);
 
-    markerLayer =
-      L.layerGroup().addTo(map);
+    markerLayer = L.layerGroup().addTo(map);
 
-    /*
-     * Click anywhere on the base map (not on a marker -- marker clicks
-     * already call event.originalEvent.stopPropagation(), which stops
-     * this Leaflet map-level click from also firing for the same
-     * physical click) to reverse-geocode that point and show what's
-     * there, the way Google Maps' "what's here" works.
-     */
-    map.on(
-      "click",
-      (event) => {
-        reverseGeocodeClick(
-          event.latlng.lat,
-          event.latlng.lng
-        );
-      }
-    );
+    map.on("click", (event) => {
+      reverseGeocodeClick(event.latlng.lat, event.latlng.lng);
+    });
 
+    initialized = true;
     locateUser();
-
     setStatus("MAP ONLINE");
   }
 
   function popupHtml(marker) {
-    const distance =
-      formatDistance(
-        marker.distance_km
-      );
+    const distance = Number.isFinite(Number(marker.distance_km))
+      ? formatDistance(marker.distance_km)
+      : "";
 
     return `
       <div class="jarvis-map-popup">
-        <strong>
-          ${escapeHtml(
-            marker.name ||
-            "Unknown place"
-          )}
-        </strong>
-
-        ${
-          distance
-            ? `<br>${escapeHtml(
-                distance
-              )} away`
-            : ""
-        }
-
+        <strong>${escapeHtml(marker.name || "Unknown place")}</strong>
+        ${distance ? `<br>${escapeHtml(distance)} away` : ""}
         ${
           marker.address
-            ? `<br>${escapeHtml(
-                marker.address
-              )}`
+            ? `<br>${escapeHtml(marker.address)}`
             : ""
         }
-
         ${
           marker.opening_hours
-            ? `<br>Hours: ${escapeHtml(
-                marker.opening_hours
-              )}`
+            ? `<br>Hours: ${escapeHtml(marker.opening_hours)}`
             : ""
         }
-
         ${
           marker.cuisine
-            ? `<br>Cuisine: ${escapeHtml(
-                marker.cuisine
-              )}`
+            ? `<br>Cuisine: ${escapeHtml(marker.cuisine)}`
             : ""
         }
       </div>
@@ -648,690 +533,366 @@
   }
 
   function closeDetails() {
-    const details =
-      document.getElementById(
-        "jarvisMapDetails"
-      );
-
-    if (!details) {
-      return;
-    }
+    const details = document.getElementById("jarvisMapDetails");
+    if (!details) return;
 
     details.hidden = true;
+    details.dataset.markerId = "";
     details.innerHTML = "";
   }
 
   function showDetails(marker) {
-    const details =
-      document.getElementById(
-        "jarvisMapDetails"
-      );
+    const details = document.getElementById("jarvisMapDetails");
+    if (!details) return;
 
-    if (!details) {
-      return;
-    }
+    const name = marker.name || "Unknown place";
+    const distance = Number.isFinite(Number(marker.distance_km))
+      ? formatDistance(marker.distance_km)
+      : "Distance unavailable";
 
-    const name =
-      marker.name ||
-      "Unknown place";
+    const website = normalizeUrl(marker.website);
+    const phone = String(marker.phone || "").trim();
+    const address = String(marker.address || "").trim();
+    const hours = String(marker.opening_hours || "").trim();
+    const cuisine = String(marker.cuisine || "").trim();
+    const type = String(marker.type || marker.category || "").trim();
 
-    const distance =
-      formatDistance(
-        marker.distance_km
-      );
-
-    const website =
-      normalizeUrl(
-        marker.website
-      );
-
-    const phone =
-      String(
-        marker.phone || ""
-      ).trim();
-
-    const address =
-      String(
-        marker.address || ""
-      ).trim();
-
-    const hours =
-      String(
-        marker.opening_hours || ""
-      ).trim();
-
-    const cuisine =
-      String(
-        marker.cuisine || ""
-      ).trim();
-
-    const type =
-      String(
-        marker.type ||
-        marker.category ||
-        ""
-      ).trim();
-
-    const lat =
-      Number(marker.lat);
-
-    const lon =
-      Number(marker.lon);
-
+    const lat = Number(marker.lat);
+    const lon = Number(marker.lon);
     const hasCoordinates =
-      Number.isFinite(lat) &&
-      Number.isFinite(lon);
+      Number.isFinite(lat) && Number.isFinite(lon);
 
-    const osmUrl =
-      hasCoordinates
-        ? `https://www.openstreetmap.org/?mlat=${encodeURIComponent(
-            lat
-          )}&mlon=${encodeURIComponent(
-            lon
-          )}#map=19/${encodeURIComponent(
-            lat
-          )}/${encodeURIComponent(
-            lon
-          )}`
-        : "";
+    const destination = hasCoordinates ? `${lat},${lon}` : "";
+    const directionsUrl = hasCoordinates
+      ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`
+      : "";
+    const navigateUrl = hasCoordinates
+      ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&dir_action=navigate`
+      : "";
 
+    const osmUrl = hasCoordinates
+      ? `https://www.openstreetmap.org/?mlat=${encodeURIComponent(
+          lat
+        )}&mlon=${encodeURIComponent(
+          lon
+        )}#map=19/${encodeURIComponent(lat)}/${encodeURIComponent(lon)}`
+      : "";
+
+    details.dataset.markerId = marker.id || "";
     details.innerHTML = `
       <div class="jarvis-map-details-header">
-
         <div>
-          <div class="jarvis-map-details-kicker">
-            LOCATION
-          </div>
-
-          <div class="jarvis-map-details-title">
-            ${escapeHtml(name)}
-          </div>
+          <div class="jarvis-map-details-kicker">LOCATION</div>
+          <div class="jarvis-map-details-title">${escapeHtml(name)}</div>
         </div>
-
         <button
           type="button"
           class="jarvis-map-details-close"
           id="jarvisMapDetailsClose"
           aria-label="Close location details"
         >×</button>
-
       </div>
 
       <div class="jarvis-map-details-body">
-
         ${
           type
-            ? `
-              <div class="jarvis-map-detail-row">
-                <span>TYPE</span>
-                <strong>
-                  ${escapeHtml(type)}
-                </strong>
-              </div>
-            `
+            ? `<div class="jarvis-map-detail-row"><span>TYPE</span><strong>${escapeHtml(
+                type
+              )}</strong></div>`
             : ""
         }
 
-        ${
-          distance
-            ? `
-              <div class="jarvis-map-detail-row">
-                <span>DISTANCE</span>
-                <strong>
-                  ${escapeHtml(distance)}
-                </strong>
-              </div>
-            `
-            : ""
-        }
+        <div class="jarvis-map-detail-row">
+          <span>DISTANCE</span>
+          <strong>${escapeHtml(distance)}</strong>
+        </div>
 
         ${
           address
-            ? `
-              <div class="jarvis-map-detail-row stacked">
-                <span>ADDRESS</span>
-                <strong>
-                  ${escapeHtml(address)}
-                </strong>
-              </div>
-            `
+            ? `<div class="jarvis-map-detail-row stacked"><span>ADDRESS</span><strong>${escapeHtml(
+                address
+              )}</strong></div>`
             : ""
         }
 
         ${
           hours
-            ? `
-              <div class="jarvis-map-detail-row stacked">
-                <span>HOURS</span>
-                <strong>
-                  ${escapeHtml(hours)}
-                </strong>
-              </div>
-            `
+            ? `<div class="jarvis-map-detail-row stacked"><span>HOURS</span><strong>${escapeHtml(
+                hours
+              )}</strong></div>`
             : ""
         }
 
         ${
           cuisine
-            ? `
-              <div class="jarvis-map-detail-row stacked">
-                <span>CUISINE</span>
-                <strong>
-                  ${escapeHtml(cuisine)}
-                </strong>
-              </div>
-            `
+            ? `<div class="jarvis-map-detail-row stacked"><span>CUISINE</span><strong>${escapeHtml(
+                cuisine
+              )}</strong></div>`
             : ""
         }
 
         ${
           phone
-            ? `
-              <div class="jarvis-map-detail-row stacked">
-                <span>PHONE</span>
-                <strong>
-                  ${escapeHtml(phone)}
-                </strong>
-              </div>
-            `
+            ? `<div class="jarvis-map-detail-row stacked"><span>PHONE</span><strong>${escapeHtml(
+                phone
+              )}</strong></div>`
             : ""
         }
 
         ${
           hasCoordinates
-            ? `
-              <div class="jarvis-map-detail-row">
-                <span>COORDINATES</span>
-                <strong>
-                  ${lat.toFixed(6)},
-                  ${lon.toFixed(6)}
-                </strong>
-              </div>
-            `
+            ? `<div class="jarvis-map-detail-row"><span>COORDINATES</span><strong>${lat.toFixed(
+                6
+              )}, ${lon.toFixed(6)}</strong></div>`
             : ""
         }
 
         <div class="jarvis-map-detail-actions">
+          ${
+            directionsUrl
+              ? `<a class="jarvis-map-detail-action" href="${escapeHtml(
+                  directionsUrl
+                )}" target="_blank" rel="noopener noreferrer">DIRECTIONS</a>`
+              : ""
+          }
+
+          ${
+            navigateUrl
+              ? `<a class="jarvis-map-detail-action" href="${escapeHtml(
+                  navigateUrl
+                )}" target="_blank" rel="noopener noreferrer">NAVIGATE</a>`
+              : ""
+          }
 
           ${
             website
-              ? `
-                <a
-                  class="jarvis-map-detail-action"
-                  href="${escapeHtml(
-                    website
-                  )}"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  WEBSITE
-                </a>
-              `
+              ? `<a class="jarvis-map-detail-action" href="${escapeHtml(
+                  website
+                )}" target="_blank" rel="noopener noreferrer">WEBSITE</a>`
               : ""
           }
 
           ${
             osmUrl
-              ? `
-                <a
-                  class="jarvis-map-detail-action"
-                  href="${escapeHtml(
-                    osmUrl
-                  )}"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  OPENSTREETMAP
-                </a>
-              `
+              ? `<a class="jarvis-map-detail-action" href="${escapeHtml(
+                  osmUrl
+                )}" target="_blank" rel="noopener noreferrer">OPENSTREETMAP</a>`
               : ""
           }
-
         </div>
-
       </div>
     `;
 
     details.hidden = false;
 
     document
-      .getElementById(
-        "jarvisMapDetailsClose"
-      )
-      ?.addEventListener(
-        "click",
-        (event) => {
-          event.stopPropagation();
-          closeDetails();
-        }
-      );
+      .getElementById("jarvisMapDetailsClose")
+      ?.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeDetails();
+      });
   }
 
   function focusMarker(marker) {
     initMap();
+    if (!map || !marker) return;
 
-    if (!map || !marker) {
-      return;
-    }
+    const normalized = normalizeMarker(marker);
+    if (!normalized) return;
 
-    const lat =
-      Number(marker.lat);
-
-    const lon =
-      Number(marker.lon);
-
-    if (
-      !Number.isFinite(lat) ||
-      !Number.isFinite(lon)
-    ) {
-      console.warn(
-        "[Jarvis Map] Invalid marker coordinates:",
-        marker
-      );
-
-      return;
-    }
-
-    /*
-     * Critical:
-     *
-     * preserveView prevents setExpanded() from centering
-     * on the user's location.
-     */
-    setExpanded(
-      true,
-      {
-        preserveView: true,
-      }
-    );
+    setExpanded(true, { preserveView: true });
 
     requestAnimationFrame(() => {
-      if (!map) {
-        return;
-      }
+      if (!map) return;
 
       map.invalidateSize();
+      map.setView([normalized.lat, normalized.lon], MARKER_ZOOM, {
+        animate: true,
+      });
 
-      /*
-       * Center on the ACTUAL marker coordinates.
-       */
-      map.setView(
-        [lat, lon],
-        MARKER_ZOOM,
-        {
-          animate: true,
-        }
-      );
-
-      if (marker.layer) {
-        marker.layer.openPopup();
+      if (normalized.layer) {
+        normalized.layer.openPopup();
       }
 
-      showDetails(marker);
+      showDetails(normalized);
     });
   }
 
   function renderResults() {
-    const results =
-      document.getElementById(
-        "jarvisMapResults"
-      );
-
-    if (!results) {
-      return;
-    }
+    const results = document.getElementById("jarvisMapResults");
+    if (!results) return;
 
     results.innerHTML = "";
-
-    results.classList.toggle(
-      "has-results",
-      markers.size > 0
-    );
+    results.classList.toggle("has-results", markers.size > 0);
 
     markers.forEach((marker) => {
-      const item =
-        createElement(
-          "button",
-          {
-            class:
-              "jarvis-map-result",
-            type: "button",
-          }
-        );
+      const item = createElement("button", {
+        class: "jarvis-map-result",
+        type: "button",
+      });
 
-      const distance =
-        formatDistance(
-          marker.distance_km
-        );
+      const distance = Number.isFinite(Number(marker.distance_km))
+        ? formatDistance(marker.distance_km)
+        : "Distance unavailable";
 
       item.innerHTML = `
-        <span class="jarvis-map-result-name">
-          ${escapeHtml(
-            marker.name ||
-            "Unknown place"
-          )}
-        </span>
-
-        <span class="jarvis-map-result-distance">
-          ${escapeHtml(distance)}
-        </span>
+        <span class="jarvis-map-result-name">${escapeHtml(
+          marker.name || "Unknown place"
+        )}</span>
+        <span class="jarvis-map-result-distance">${escapeHtml(
+          distance
+        )}</span>
       `;
 
-      item.addEventListener(
-        "click",
-        (event) => {
-          event.stopPropagation();
-          focusMarker(marker);
-        }
-      );
+      item.addEventListener("click", (event) => {
+        event.stopPropagation();
+        focusMarker(marker);
+      });
 
       results.appendChild(item);
     });
   }
 
-  function setMarkers(payload) {
-    initMap();
-
-    if (
-      !map ||
-      !markerLayer
-    ) {
-      console.warn(
-        "[Jarvis Map] set_markers received before map initialization",
-        payload
-      );
-
-      return;
-    }
-
-    /*
-     * Support both:
-     *
-     * {
-     *   action: "set_markers",
-     *   markers: [...]
-     * }
-     *
-     * and:
-     *
-     * {
-     *   action: "set_markers",
-     *   payload: {
-     *     markers: [...]
-     *   }
-     * }
-     */
-    let data = payload || {};
-
-    if (
-      payload?.payload &&
-      typeof payload.payload ===
-        "object"
-    ) {
-      data = {
-        ...payload,
-        ...payload.payload,
-      };
-    }
-
-    const incomingMarkers =
-      Array.isArray(data.markers)
-        ? data.markers
-        : Array.isArray(data.places)
-          ? data.places
-          : [];
-
-    console.log(
-      "[Jarvis Map] Received markers:",
-      incomingMarkers
-    );
-
-    if (
-      data.replace !== false
-    ) {
-      markerLayer.clearLayers();
-      markers.clear();
-      closeDetails();
-    }
-
-    incomingMarkers.forEach(
-      (marker) => {
-        const lat =
-          Number(marker.lat);
-
-        const lon =
-          Number(marker.lon);
-
-        /*
-         * Never render a marker without valid coordinates.
-         */
-        if (
-          !Number.isFinite(lat) ||
-          !Number.isFinite(lon)
-        ) {
-          console.warn(
-            "[Jarvis Map] Skipping marker with invalid coordinates:",
-            marker
-          );
-
-          return;
-        }
-
-        const id =
-          marker.id ||
-          `${lat}:${lon}:${
-            marker.name ||
-            "place"
-          }`;
-
-        const normalized = {
-          ...marker,
-          lat,
-          lon,
-          id,
-        };
-
-        /*
-         * Use a CSS/HTML marker.
-         *
-         * This avoids Leaflet's default marker-image dependency.
-         */
-        const pinIcon =
-          L.divIcon({
-            className:
-              "jarvis-place-marker-wrapper",
-
-            html: `
-              <div
-                class="jarvis-place-marker"
-                title="${escapeHtml(
-                  marker.name ||
-                  "Place"
-                )}"
-              >
-                <span></span>
-              </div>
-            `,
-
-            iconSize: [
-              24,
-              32,
-            ],
-
-            iconAnchor: [
-              12,
-              30,
-            ],
-
-            popupAnchor: [
-              0,
-              -30,
-            ],
-          });
-
-        const pin =
-          L.marker(
-            [lat, lon],
-            {
-              title:
-                marker.name ||
-                "Place",
-
-              icon:
-                pinIcon,
-
-              keyboard:
-                true,
-
-              zIndexOffset:
-                1000,
-            }
-          )
-            .bindPopup(
-              popupHtml(
-                normalized
-              )
-            )
-            .addTo(
-              markerLayer
-            );
-
-        /*
-         * Marker click.
-         *
-         * Do NOT use the user's location here.
-         */
-        pin.on(
-          "click",
-          (event) => {
-            event
-              ?.originalEvent
-              ?.stopPropagation?.();
-
-            focusMarker({
-              ...normalized,
-              layer: pin,
-            });
-          }
-        );
-
-        markers.set(
-          id,
-          {
-            ...normalized,
-            layer: pin,
-          }
-        );
-      }
-    );
-
-    renderResults();
-
-    /*
-     * Expand without recentering on the user.
-     */
-    setExpanded(
-      true,
-      {
-        preserveView: true,
-      }
-    );
-
-    requestAnimationFrame(() => {
-      if (!map || !markers.size) {
-        return;
-      }
-
-      map.invalidateSize();
-
-      /*
-       * Fit the returned search results.
-       *
-       * User location is included only to provide context;
-       * it does not overwrite the marker positions.
-       */
-      const bounds =
-        L.latLngBounds(
-          Array.from(
-            markers.values()
-          ).map(
-            (marker) => [
-              marker.lat,
-              marker.lon,
-            ]
-          )
-        );
-
-      if (userLocation) {
-        bounds.extend([
-          userLocation.lat,
-          userLocation.lon,
-        ]);
-      }
-
-      map.fitBounds(
-        bounds.pad(0.15),
-        {
-          maxZoom: 15,
-          animate: true,
-        }
-      );
-    });
-  }
-
   function clearMarkers(category = "") {
     if (!markerLayer) {
+      markers.clear();
+      renderResults();
+      closeDetails();
       return;
     }
 
-    const wanted =
-      String(category)
-        .trim()
-        .toLowerCase();
+    const wanted = String(category).trim().toLowerCase();
 
     if (!wanted) {
       markerLayer.clearLayers();
       markers.clear();
       closeDetails();
       renderResults();
-
       return;
     }
 
-    markers.forEach(
-      (marker) => {
-        if (
-          String(
-            marker.category ||
-            ""
-          ).toLowerCase() ===
-          wanted
-        ) {
-          markerLayer.removeLayer(
-            marker.layer
-          );
-
-          markers.delete(
-            marker.id
-          );
-        }
+    markers.forEach((marker) => {
+      if (
+        String(marker.category || "").trim().toLowerCase() === wanted
+      ) {
+        markerLayer.removeLayer(marker.layer);
+        markers.delete(marker.id);
       }
-    );
+    });
 
     closeDetails();
     renderResults();
   }
 
+  function setMarkers(payload) {
+    initMap();
+
+    if (!map || !markerLayer) return;
+
+    let data = payload || {};
+
+    if (
+      payload?.payload &&
+      typeof payload.payload === "object"
+    ) {
+      data = { ...payload, ...payload.payload };
+    }
+
+    const incoming = Array.isArray(data.markers)
+      ? data.markers
+      : Array.isArray(data.places)
+        ? data.places
+        : [];
+
+    if (data.replace !== false) {
+      markerLayer.clearLayers();
+      markers.clear();
+      closeDetails();
+    }
+
+    incoming.forEach((rawMarker) => {
+      const marker = normalizeMarker(rawMarker);
+      if (!marker) return;
+
+      const existing = markers.get(marker.id);
+
+      if (existing?.layer) {
+        markerLayer.removeLayer(existing.layer);
+      }
+
+      const pinIcon = L.divIcon({
+        className: "jarvis-place-marker-wrapper",
+        html: `
+          <div
+            class="jarvis-place-marker"
+            title="${escapeHtml(marker.name || "Place")}"
+          >
+            <span></span>
+          </div>
+        `,
+        iconSize: [24, 32],
+        iconAnchor: [12, 30],
+        popupAnchor: [0, -30],
+      });
+
+      const pin = L.marker([marker.lat, marker.lon], {
+        title: marker.name || "Place",
+        icon: pinIcon,
+        keyboard: true,
+        zIndexOffset: 1000,
+      })
+        .bindPopup(popupHtml(marker))
+        .addTo(markerLayer);
+
+      marker.layer = pin;
+
+      pin.on("click", (event) => {
+        event?.originalEvent?.stopPropagation?.();
+        focusMarker(marker);
+      });
+
+      markers.set(marker.id, marker);
+    });
+
+    renderResults();
+
+    setExpanded(true, { preserveView: true });
+
+    requestAnimationFrame(() => {
+      if (!map || !markers.size) return;
+
+      map.invalidateSize();
+
+      const bounds = L.latLngBounds(
+        Array.from(markers.values()).map((marker) => [
+          marker.lat,
+          marker.lon,
+        ])
+      );
+
+      if (userLocation) {
+        bounds.extend([userLocation.lat, userLocation.lon]);
+      }
+
+      map.fitBounds(bounds.pad(0.15), {
+        maxZoom: 15,
+        animate: true,
+      });
+    });
+  }
+
   function submitSearch(query) {
     const trimmed = String(query || "").trim();
-
-    if (!trimmed) {
-      return;
-    }
+    if (!trimmed) return;
 
     ensureUI();
     revealMapWidget();
-    setExpanded(true);
+
+    // A new query starts a new result set immediately.
+    // This prevents Search A from remaining visible while Search B loads.
+    clearMarkers();
+
+    setExpanded(true, { preserveView: true });
     setStatus(`Searching "${trimmed}"...`);
 
     if (!sendToBackend({ type: "map_search", query: trimmed })) {
@@ -1355,188 +916,119 @@
 
   function handleSearchResult(data) {
     const text = String(data?.text || "").trim();
-    setStatus(text || (data?.error ? "Search failed." : "MAP ONLINE"));
-  }
 
-  function handleReverseGeocodeResult(data) {
-    const marker = data?.marker;
-
-    if (!marker || marker.error) {
-      setStatus(marker?.error || "Could not identify this location.");
+    if (data?.error) {
+      clearMarkers();
+      setStatus(String(data.error));
       return;
     }
 
-    ensureUI();
+    if (
+      text.toLowerCase().includes("no results") ||
+      text.toLowerCase().includes("no places found") ||
+      text.toLowerCase().includes("search failed")
+    ) {
+      clearMarkers();
+    }
+
+    setStatus(text || "MAP ONLINE");
+  }
+
+  function handleReverseGeocodeResult(data) {
+    const raw = data?.marker;
+
+    if (!raw || raw.error) {
+      setStatus(raw?.error || "Could not identify this location.");
+      return;
+    }
+
+    const marker = normalizeMarker(raw);
+    if (!marker) {
+      setStatus("Invalid location returned.");
+      return;
+    }
+
     revealMapWidget();
 
-    /*
-     * Add without clearing existing pins (replace: false) -- a "what's
-     * here" click augments the current results rather than replacing
-     * a prior search. Reuses setMarkers' existing rendering pipeline
-     * (popup, click handling, results-list entry) rather than
-     * duplicating marker-creation logic here.
-     */
+    // A map click is a selection, not another search result.
+    // Replace the previous selection so the list cannot accumulate clicks.
+    clearMarkers();
+
     setMarkers({
       markers: [marker],
-      replace: false,
+      replace: true,
     });
 
-    /*
-     * setMarkers doesn't return the marker it just created, so look it
-     * back up by the same id formula it uses internally, to get the
-     * .layer reference focusMarker() needs to open the popup.
-     */
-    const id =
-      marker.id ||
-      `${Number(marker.lat)}:${Number(marker.lon)}:${marker.name || "place"}`;
-
-    const stored = markers.get(id);
-
-    if (stored) {
-      focusMarker(stored);
-    }
+    const stored = markers.get(marker.id);
+    if (stored) focusMarker(stored);
 
     setStatus("MAP ONLINE");
   }
 
   function handleAction(payload) {
-    if (!payload?.action) {
+    if (!payload?.action) return;
+
+    if (payload.action === "set_markers") {
+      revealMapWidget();
+      setMarkers(payload);
       return;
     }
 
-    if (
-      payload.action ===
-      "set_markers"
-    ) {
-      // A set_markers action arriving from the backend (e.g. the user
-      // asked Jarvis to find nearby places via voice/chat) means there
-      // are results to show, whether or not the panel was ever manually
-      // opened. Reveal it now so markers aren't applied to a hidden,
-      // zero-size map the user never sees.
-      revealMapWidget();
-      setMarkers(payload);
+    if (payload.action === "clear_markers") {
+      clearMarkers(payload.category);
+      return;
     }
 
-    else if (
-      payload.action ===
-      "clear_markers"
-    ) {
-      clearMarkers(
-        payload.category
-      );
-    }
-
-    else if (
-      payload.action ===
-      "focus_marker"
-    ) {
+    if (payload.action === "focus_marker") {
       revealMapWidget();
-      focusMarker({
-        lat:
-          payload.latitude,
-        lon:
-          payload.longitude,
-        name:
-          payload.name || "",
+
+      const marker = normalizeMarker({
+        lat: payload.latitude,
+        lon: payload.longitude,
+        name: payload.name || "",
       });
+
+      if (marker) focusMarker(marker);
     }
   }
 
   function getContext() {
-    const widget =
-      document.getElementById(
-        "jarvisMapWidget"
-      );
+    const widget = document.getElementById("jarvisMapWidget");
 
     const context = {
       open: expanded,
-
-      visible:
-        !!widget?.classList.contains(
-          "map-visible"
-        ),
-
-      latitude:
-        userLocation?.lat ??
-        null,
-
-      longitude:
-        userLocation?.lon ??
-        null,
-
-      accuracy_m:
-        userLocation?.accuracy ??
-        null,
-
-      zoom:
-        map?.getZoom?.() ??
-        null,
-
-      marker_count:
-        markers.size,
-
-      markers:
-        Array.from(
-          markers.values()
-        )
-          .slice(0, 20)
-          .map(
-            (marker) => ({
-              id:
-                marker.id,
-
-              name:
-                marker.name,
-
-              latitude:
-                marker.lat,
-
-              longitude:
-                marker.lon,
-
-              category:
-                marker.category,
-
-              distance_km:
-                marker.distance_km,
-
-              address:
-                marker.address,
-
-              opening_hours:
-                marker.opening_hours,
-
-              phone:
-                marker.phone,
-
-              website:
-                marker.website,
-
-              cuisine:
-                marker.cuisine,
-
-              type:
-                marker.type,
-            })
-          ),
+      visible: !!widget?.classList.contains("map-visible"),
+      latitude: userLocation?.lat ?? null,
+      longitude: userLocation?.lon ?? null,
+      accuracy_m: userLocation?.accuracy ?? null,
+      zoom: map?.getZoom?.() ?? null,
+      marker_count: markers.size,
+      markers: Array.from(markers.values())
+        .slice(0, 20)
+        .map((marker) => ({
+          id: marker.id,
+          name: marker.name,
+          latitude: marker.lat,
+          longitude: marker.lon,
+          category: marker.category,
+          distance_km: marker.distance_km,
+          address: marker.address,
+          opening_hours: marker.opening_hours,
+          phone: marker.phone,
+          website: marker.website,
+          cuisine: marker.cuisine,
+          type: marker.type,
+        })),
     };
 
     if (map) {
-      const bounds =
-        map.getBounds();
+      const bounds = map.getBounds();
 
       context.bounds = {
-        north:
-          bounds.getNorth(),
-
-        south:
-          bounds.getSouth(),
-
-        east:
-          bounds.getEast(),
-
-        west:
-          bounds.getWest(),
+        north: bounds.getNorth(),
+        south: bounds.getSouth(),
+        east: bounds.getEast(),
+        west: bounds.getWest(),
       };
     }
 
@@ -1544,147 +1036,68 @@
   }
 
   function centerOnUser() {
-    if (!map || !userLocation) {
-      return;
-    }
+    if (!map || !userLocation) return;
 
     map.setView(
-      [
-        userLocation.lat,
-        userLocation.lon,
-      ],
-      Math.max(
-        map.getZoom(),
-        PREVIEW_ZOOM
-      ),
-      {
-        animate: true,
-      }
+      [userLocation.lat, userLocation.lon],
+      Math.max(map.getZoom(), PREVIEW_ZOOM),
+      { animate: true }
     );
   }
 
   function showWorld() {
-    if (!map) {
-      initMap();
-    }
+    if (!map) initMap();
+    if (!map) return;
 
-    if (!map) {
-      return;
-    }
-
-    map.setView(
-      DEFAULT_CENTER,
-      DEFAULT_ZOOM,
-      {
-        animate: true,
-      }
-    );
+    map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, {
+      animate: true,
+    });
   }
 
   function zoomMap(direction) {
-    if (!map) {
-      initMap();
-    }
+    if (!map) initMap();
+    if (!map) return;
 
-    if (!map) {
-      return;
-    }
-
-    const current =
-      map.getZoom();
-
-    const next =
-      Math.max(
-        2,
-        Math.min(
-          19,
-          current +
-            Number(direction || 0)
-        )
-      );
-
-    map.setZoom(
-      next,
-      {
-        animate: true,
-      }
+    const next = Math.max(
+      2,
+      Math.min(19, map.getZoom() + Number(direction || 0))
     );
+
+    map.setZoom(next, { animate: true });
   }
 
   window.JarvisMap = {
-    toggle:
-      toggleVisibility,
-
-    open() {
-      revealMapWidget();
-    },
+    toggle: toggleVisibility,
+    open: revealMapWidget,
 
     close() {
-      const widget =
-        document.getElementById(
-          "jarvisMapWidget"
-        );
-
-      widget?.classList.remove(
-        "map-visible"
-      );
-
-      localStorage.setItem(
-        STORAGE_KEY,
-        "0"
-      );
+      const widget = document.getElementById("jarvisMapWidget");
+      widget?.classList.remove("map-visible");
+      localStorage.setItem(STORAGE_KEY, "0");
     },
 
-    expand() {
-      setExpanded(true);
-    },
-
-    collapse() {
-      setExpanded(false);
-    },
-
+    expand: () => setExpanded(true),
+    collapse: () => setExpanded(false),
     centerOnUser,
-
     showWorld,
-
-    zoom:
-      zoomMap,
-
+    zoom: zoomMap,
     getContext,
-
     handleAction,
-
     handleSearchResult,
-
     handleReverseGeocodeResult,
-
-    clear:
-      clearMarkers,
-
-    focus:
-      focusMarker,
+    clear: clearMarkers,
+    focus: focusMarker,
   };
 
-  document.addEventListener(
-    "DOMContentLoaded",
-    () => {
-      ensureUI();
+  document.addEventListener("DOMContentLoaded", () => {
+    ensureUI();
 
-      if (
-        localStorage.getItem(
-          STORAGE_KEY
-        ) === "1"
-      ) {
-        document
-          .getElementById(
-            "jarvisMapWidget"
-          )
-          ?.classList.add(
-            "map-visible"
-          );
+    if (localStorage.getItem(STORAGE_KEY) === "1") {
+      document
+        .getElementById("jarvisMapWidget")
+        ?.classList.add("map-visible");
 
-        initMap();
-      }
+      initMap();
     }
-  );
+  });
 })();
