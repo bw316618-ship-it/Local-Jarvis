@@ -15,7 +15,12 @@ from ui.native_overlay import NativeOverlay
 from voice import session_state
 
 
-HUD_URL = f"http://localhost:{CONFIG['hud_http_port']}/index.html"
+HUD_URL = (
+    f"http://localhost:"
+    f"{CONFIG['hud_http_port']}"
+    f"/index.html"
+)
+
 _window = None
 _overlay = None
 _quitting = False
@@ -28,6 +33,7 @@ def _startup_dir():
         return None
 
     appdata = os.environ.get("APPDATA")
+
     if not appdata:
         return None
 
@@ -43,84 +49,137 @@ def _startup_dir():
 
 def _autostart_path():
     startup_dir = _startup_dir()
-    return None if startup_dir is None else startup_dir / _AUTOSTART_NAME
+
+    if startup_dir is None:
+        return None
+
+    return startup_dir / _AUTOSTART_NAME
 
 
 def _pythonw_path():
-    exe = Path(sys.executable)
-    candidate = exe.with_name("pythonw.exe")
-    return candidate if candidate.exists() else exe
+    executable = Path(sys.executable)
+    pythonw = executable.with_name(
+        "pythonw.exe"
+    )
+
+    if pythonw.exists():
+        return pythonw
+
+    return executable
 
 
 def _is_autostart_enabled(item=None):
     path = _autostart_path()
-    return path is not None and path.exists()
+
+    return (
+        path is not None
+        and path.exists()
+    )
 
 
 def _toggle_autostart(icon, item):
     if sys.platform != "win32":
-        print("[Jarvis tray] Autostart is only implemented for Windows.")
+        print(
+            "[Jarvis tray] "
+            "Autostart is only implemented "
+            "for Windows."
+        )
         return
 
     path = _autostart_path()
 
     if path is None:
         print(
-            "[Jarvis tray] Could not resolve the Startup folder "
-            "(APPDATA not set) -- can't manage autostart."
+            "[Jarvis tray] "
+            "Could not resolve Windows "
+            "Startup folder."
         )
         return
 
     if path.exists():
         try:
             path.unlink()
-            print("[Jarvis tray] Removed from Windows startup.")
+            print(
+                "[Jarvis tray] "
+                "Removed from Windows startup."
+            )
         except OSError as exc:
-            print(f"[Jarvis tray] Could not remove autostart entry: {exc}")
+            print(
+                "[Jarvis tray] "
+                f"Could not remove autostart entry: {exc}"
+            )
+
         return
 
     script_path = Path(__file__).resolve()
     pythonw = _pythonw_path()
 
     vbs = (
-        'Set WshShell = CreateObject("WScript.Shell")\n'
+        'Set WshShell = '
+        'CreateObject("WScript.Shell")\n'
         'WshShell.Run Chr(34) & "'
-        f'{pythonw}" & Chr(34) & " " & Chr(34) & "{script_path}'
+        f'{pythonw}'
+        '" & Chr(34) & " " & Chr(34) & "'
+        f'{script_path}'
         '" & Chr(34), 0, False\n'
         "Set WshShell = Nothing\n"
     )
 
     try:
-        path.write_text(vbs, encoding="utf-8")
-        print("[Jarvis tray] Added to Windows startup.")
+        path.write_text(
+            vbs,
+            encoding="utf-8",
+        )
+
+        print(
+            "[Jarvis tray] "
+            "Added to Windows startup."
+        )
+
     except OSError as exc:
-        print(f"[Jarvis tray] Could not write autostart entry: {exc}")
+        print(
+            "[Jarvis tray] "
+            f"Could not write autostart entry: {exc}"
+        )
 
 
 def _build_icon_image():
     size = 64
-    img = Image.new("RGBA", (size, size), (10, 14, 18, 255))
-    draw = ImageDraw.Draw(img)
+
+    image = Image.new(
+        "RGBA",
+        (size, size),
+        (10, 14, 18, 255),
+    )
+
+    draw = ImageDraw.Draw(image)
 
     pad = 10
 
     draw.ellipse(
-        [pad, pad, size - pad, size - pad],
+        [
+            pad,
+            pad,
+            size - pad,
+            size - pad,
+        ],
         outline=(64, 220, 255, 255),
         width=6,
     )
 
+    center = size // 2
+
     draw.ellipse(
         [
-            size // 2 - 6,
-            size // 2 - 6,
-            size // 2 + 6,
-            size // 2 + 6,
+            center - 6,
+            center - 6,
+            center + 6,
+            center + 6,
         ],
         fill=(64, 220, 255, 255),
     )
 
-    return img
+    return image
 
 
 def _open_hud(icon=None, item=None):
@@ -136,7 +195,7 @@ def _toggle_overlay(icon, item):
 def _overlay_visible(item=None):
     return (
         _overlay is not None
-        and _overlay._visible
+        and _overlay.is_visible()
     )
 
 
@@ -164,27 +223,42 @@ def _mute_checked(item):
 def _show_status(icon, item):
     snapshot = system_status_snapshot()
 
+    lines = []
+
     cpu = snapshot.get("cpu_percent")
     memory = snapshot.get("memory_percent")
     disk = snapshot.get("disk_percent")
 
-    lines = []
-
     if cpu is not None:
-        lines.append(f"CPU {cpu:.0f}%")
+        lines.append(
+            f"CPU {cpu:.0f}%"
+        )
 
     if memory is not None:
-        lines.append(f"RAM {memory:.0f}%")
+        lines.append(
+            f"RAM {memory:.0f}%"
+        )
 
     if disk is not None:
-        lines.append(f"Disk {disk:.0f}%")
+        lines.append(
+            f"Disk {disk:.0f}%"
+        )
 
-    message = " | ".join(lines) if lines else "Status unavailable"
+    message = (
+        " | ".join(lines)
+        if lines
+        else "Status unavailable"
+    )
 
     try:
-        icon.notify(message, title="Jarvis status")
+        icon.notify(
+            message,
+            title="Jarvis status",
+        )
     except Exception:
-        print(f"[Jarvis tray] {message}")
+        print(
+            f"[Jarvis tray] {message}"
+        )
 
 
 def _quit(icon, item):
@@ -205,8 +279,8 @@ def _quit(icon, item):
             pass
 
 
-def _run_tray():
-    menu = pystray.Menu(
+def _build_menu():
+    return pystray.Menu(
         pystray.MenuItem(
             "Open HUD",
             _open_hud,
@@ -239,11 +313,13 @@ def _run_tray():
         ),
     )
 
+
+def _run_tray():
     icon = pystray.Icon(
         "jarvis",
         _build_icon_image(),
         "Jarvis",
-        menu,
+        _build_menu(),
     )
 
     icon.run()
@@ -253,23 +329,34 @@ def main():
     global _window
     global _overlay
 
-    print("Starting Jarvis tray app...")
+    print(
+        "Starting Jarvis tray app..."
+    )
 
     runtime = JarvisRuntime()
+
     hud.attach_runtime(runtime)
 
-    started = hud.start(open_browser=False)
+    started = hud.start(
+        open_browser=False
+    )
 
     if not started:
         print(
-            "[Jarvis tray] Could not start the HUD server "
-            "(see the error above) -- nothing for the tray app "
-            "to show. Exiting."
+            "[Jarvis tray] "
+            "Could not start the HUD server."
         )
         return
 
-    print(f"Jarvis tray running -- HUD available at {HUD_URL}")
-    print("Right-click the tray icon for options.")
+    print(
+        f"Jarvis tray running -- "
+        f"HUD available at {HUD_URL}"
+    )
+
+    print(
+        "Right-click the tray icon "
+        "for options."
+    )
 
     _window = webview.create_window(
         "Jarvis",
@@ -280,7 +367,9 @@ def main():
         hidden=True,
     )
 
-    _window.events.closing += _on_window_closing
+    _window.events.closing += (
+        _on_window_closing
+    )
 
     _overlay = NativeOverlay(
         system_status_snapshot
@@ -290,10 +379,13 @@ def main():
 
     threading.Thread(
         target=_run_tray,
+        name="JarvisTray",
         daemon=True,
     ).start()
 
-    webview.start(gui="edgechromium")
+    webview.start(
+        gui="edgechromium"
+    )
 
 
 if __name__ == "__main__":
