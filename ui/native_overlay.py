@@ -14,22 +14,9 @@ gdi32 = ctypes.windll.gdi32
 kernel32 = ctypes.windll.kernel32
 
 
-# ctypes.wintypes doesn't reliably define LRESULT across Python
-# versions (confirmed missing on at least one install this app was
-# tested on), and WPARAM/LPARAM have historically had pointer-size
-# inconsistencies on 64-bit Python in older stdlib versions. Defining
-# these ourselves as the real Win32 typedefs -- WPARAM = UINT_PTR,
-# LPARAM/LRESULT = LONG_PTR, i.e. pointer-sized -- sidesteps relying
-# on stdlib completeness for exactly the three types a WNDPROC
-# callback signature needs.
 WPARAM = ctypes.c_size_t
 LPARAM = ctypes.c_ssize_t
 LRESULT = ctypes.c_ssize_t
-
-# HCURSOR is also missing from stdlib wintypes on at least this
-# Python install (confirmed via direct inspection, not assumption --
-# see the audit below). Every real Win32 handle type is just an alias
-# for HANDLE (c_void_p), so this is the correct definition.
 HCURSOR = wintypes.HANDLE
 
 
@@ -40,11 +27,10 @@ WS_EX_NOACTIVATE = 0x08000000
 
 WM_DESTROY = 0x0002
 WM_LBUTTONDOWN = 0x0201
-WM_LBUTTONUP = 0x0202
-WM_MOUSEMOVE = 0x0200
 WM_TIMER = 0x0113
 WM_NCHITTEST = 0x0084
 WM_MOUSEACTIVATE = 0x0021
+WM_NCLBUTTONDOWN = 0x00A1
 
 HTCLIENT = 1
 HTCAPTION = 2
@@ -53,6 +39,7 @@ MA_NOACTIVATE = 3
 
 SW_SHOWNOACTIVATE = 4
 SW_HIDE = 0
+
 SWP_NOACTIVATE = 0x0010
 SWP_SHOWWINDOW = 0x0040
 
@@ -80,6 +67,15 @@ class SIZE(ctypes.Structure):
     ]
 
 
+class RECT(ctypes.Structure):
+    _fields_ = [
+        ("left", wintypes.LONG),
+        ("top", wintypes.LONG),
+        ("right", wintypes.LONG),
+        ("bottom", wintypes.LONG),
+    ]
+
+
 class BLENDFUNCTION(ctypes.Structure):
     _fields_ = [
         ("BlendOp", wintypes.BYTE),
@@ -89,12 +85,26 @@ class BLENDFUNCTION(ctypes.Structure):
     ]
 
 
-class RECT(ctypes.Structure):
+class BITMAPINFOHEADER(ctypes.Structure):
     _fields_ = [
-        ("left", wintypes.LONG),
-        ("top", wintypes.LONG),
-        ("right", wintypes.LONG),
-        ("bottom", wintypes.LONG),
+        ("biSize", wintypes.DWORD),
+        ("biWidth", wintypes.LONG),
+        ("biHeight", wintypes.LONG),
+        ("biPlanes", wintypes.WORD),
+        ("biBitCount", wintypes.WORD),
+        ("biCompression", wintypes.DWORD),
+        ("biSizeImage", wintypes.DWORD),
+        ("biXPelsPerMeter", wintypes.LONG),
+        ("biYPelsPerMeter", wintypes.LONG),
+        ("biClrUsed", wintypes.DWORD),
+        ("biClrImportant", wintypes.DWORD),
+    ]
+
+
+class BITMAPINFO(ctypes.Structure):
+    _fields_ = [
+        ("bmiHeader", BITMAPINFOHEADER),
+        ("bmiColors", wintypes.DWORD * 3),
     ]
 
 
@@ -122,18 +132,9 @@ class WNDCLASSW(ctypes.Structure):
     ]
 
 
-# Explicit argtypes/restype for every Win32 call this module makes.
-# Left unset, ctypes marshals every argument and return value of an
-# untyped foreign call as a 32-bit c_int. That's silent, not an
-# exception: on 64-bit Windows it truncates any HWND/HDC/HBITMAP or
-# other pointer-sized handle that happens to fall outside the 32-bit
-# range, corrupting it. The window wouldn't necessarily crash --
-# subsequent calls using the corrupted handle would just silently
-# fail (UpdateLayeredWindow returning False, the window never
-# appearing), which is a far harder bug to diagnose than an
-# AttributeError. Declaring these removes that whole class of risk.
-
-user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
+user32.RegisterClassW.argtypes = [
+    ctypes.POINTER(WNDCLASSW)
+]
 user32.RegisterClassW.restype = wintypes.ATOM
 
 user32.CreateWindowExW.argtypes = [
@@ -163,13 +164,21 @@ user32.SetWindowPos.argtypes = [
 ]
 user32.SetWindowPos.restype = wintypes.BOOL
 
-user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.ShowWindow.argtypes = [
+    wintypes.HWND,
+    ctypes.c_int,
+]
 user32.ShowWindow.restype = wintypes.BOOL
 
-user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+user32.GetSystemMetrics.argtypes = [
+    ctypes.c_int
+]
 user32.GetSystemMetrics.restype = ctypes.c_int
 
-user32.LoadCursorW.argtypes = [wintypes.HINSTANCE, wintypes.LPCWSTR]
+user32.LoadCursorW.argtypes = [
+    wintypes.HINSTANCE,
+    wintypes.LPCWSTR,
+]
 user32.LoadCursorW.restype = HCURSOR
 
 user32.DefWindowProcW.argtypes = [
@@ -180,14 +189,22 @@ user32.DefWindowProcW.argtypes = [
 ]
 user32.DefWindowProcW.restype = LRESULT
 
-user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+user32.DispatchMessageW.argtypes = [
+    ctypes.POINTER(wintypes.MSG)
+]
 user32.DispatchMessageW.restype = LRESULT
 
-user32.GetDC.argtypes = [wintypes.HWND]
+user32.GetDC.argtypes = [
+    wintypes.HWND
+]
 user32.GetDC.restype = wintypes.HDC
 
-# GetMessageW can return -1 on error (not just 0/nonzero), so restype
-# is a signed c_int rather than BOOL to preserve that distinction.
+user32.ReleaseDC.argtypes = [
+    wintypes.HWND,
+    wintypes.HDC,
+]
+user32.ReleaseDC.restype = ctypes.c_int
+
 user32.GetMessageW.argtypes = [
     ctypes.POINTER(wintypes.MSG),
     wintypes.HWND,
@@ -196,7 +213,10 @@ user32.GetMessageW.argtypes = [
 ]
 user32.GetMessageW.restype = ctypes.c_int
 
-user32.KillTimer.argtypes = [wintypes.HWND, ctypes.c_size_t]
+user32.KillTimer.argtypes = [
+    wintypes.HWND,
+    ctypes.c_size_t,
+]
 user32.KillTimer.restype = wintypes.BOOL
 
 user32.PostMessageW.argtypes = [
@@ -207,14 +227,13 @@ user32.PostMessageW.argtypes = [
 ]
 user32.PostMessageW.restype = wintypes.BOOL
 
-user32.PostQuitMessage.argtypes = [ctypes.c_int]
+user32.PostQuitMessage.argtypes = [
+    ctypes.c_int
+]
 user32.PostQuitMessage.restype = None
 
 user32.ReleaseCapture.argtypes = []
 user32.ReleaseCapture.restype = wintypes.BOOL
-
-user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
-user32.ReleaseDC.restype = ctypes.c_int
 
 user32.SendMessageW.argtypes = [
     wintypes.HWND,
@@ -232,7 +251,9 @@ user32.SetTimer.argtypes = [
 ]
 user32.SetTimer.restype = ctypes.c_size_t
 
-user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+user32.TranslateMessage.argtypes = [
+    ctypes.POINTER(wintypes.MSG)
+]
 user32.TranslateMessage.restype = wintypes.BOOL
 
 user32.UpdateLayeredWindow.argtypes = [
@@ -248,15 +269,17 @@ user32.UpdateLayeredWindow.argtypes = [
 ]
 user32.UpdateLayeredWindow.restype = wintypes.BOOL
 
-gdi32.CreateCompatibleDC.argtypes = [wintypes.HDC]
+user32.GetWindowRect.argtypes = [
+    wintypes.HWND,
+    ctypes.POINTER(RECT),
+]
+user32.GetWindowRect.restype = wintypes.BOOL
+
+gdi32.CreateCompatibleDC.argtypes = [
+    wintypes.HDC
+]
 gdi32.CreateCompatibleDC.restype = wintypes.HDC
 
-# pbmi is declared as a generic void pointer rather than
-# POINTER(BITMAPINFO): the real BITMAPINFO/BITMAPINFOHEADER classes
-# are defined locally inside _update_layered_window (not at module
-# scope), and ctypes can raise ArgumentError if a byref() target's
-# exact type doesn't match a strictly-typed POINTER(...) argtype.
-# c_void_p accepts any byref()/pointer value without that check.
 gdi32.CreateDIBSection.argtypes = [
     wintypes.HDC,
     ctypes.c_void_p,
@@ -267,26 +290,29 @@ gdi32.CreateDIBSection.argtypes = [
 ]
 gdi32.CreateDIBSection.restype = wintypes.HBITMAP
 
-gdi32.DeleteDC.argtypes = [wintypes.HDC]
+gdi32.DeleteDC.argtypes = [
+    wintypes.HDC
+]
 gdi32.DeleteDC.restype = wintypes.BOOL
 
-gdi32.DeleteObject.argtypes = [wintypes.HGDIOBJ]
+gdi32.DeleteObject.argtypes = [
+    wintypes.HGDIOBJ
+]
 gdi32.DeleteObject.restype = wintypes.BOOL
 
-gdi32.SelectObject.argtypes = [wintypes.HDC, wintypes.HGDIOBJ]
+gdi32.SelectObject.argtypes = [
+    wintypes.HDC,
+    wintypes.HGDIOBJ,
+]
 gdi32.SelectObject.restype = wintypes.HGDIOBJ
 
 kernel32.GetLastError.argtypes = []
 kernel32.GetLastError.restype = wintypes.DWORD
 
-kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
-kernel32.GetModuleHandleW.restype = wintypes.HMODULE
-
-user32.GetWindowRect.argtypes = [
-    wintypes.HWND,
-    ctypes.POINTER(RECT),
+kernel32.GetModuleHandleW.argtypes = [
+    wintypes.LPCWSTR
 ]
-user32.GetWindowRect.restype = wintypes.BOOL
+kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 
 
 class NativeOverlay:
@@ -300,36 +326,43 @@ class NativeOverlay:
     BG_ALPHA = 178
     BORDER_ALPHA = 105
 
+    RENDER_INTERVAL_MS = 50
+
     CYAN = (58, 214, 255, 255)
     TEXT = (216, 246, 255, 255)
     DATE = (143, 185, 196, 255)
     LABEL = (111, 151, 162, 255)
+
+    # Exact RGB conversion of storm3d.js's own constants -- its
+    # default themeColor ("#e08a2e") and HOT_COLOR (0xfff6e0) -- so
+    # the miniature icon actually matches the real storm's palette
+    # rather than an approximation.
+    STORM_THEME = (224, 138, 46, 255)
+    STORM_AMBER = (255, 246, 224, 255)
+
+    TIMER_ID = 1
 
     def __init__(self, status_provider):
         self.status_provider = status_provider
 
         self._thread = None
         self._status_thread = None
+
         self._ready = threading.Event()
         self._stop = threading.Event()
 
         self._hwnd = None
+        self._wnd_proc_ref = None
+
         self._class_name = "JarvisNativeOverlay"
 
         self._collapsed = False
         self._visible = True
 
-        # None means "use the auto-anchored top-right corner" (see
-        # _position()). Once the user drags the window, this holds
-        # the real on-screen (x, y) so subsequent repaints don't
-        # silently snap it back to the anchor -- which is exactly
-        # what was happening before: _position() was being
-        # recomputed from scratch on every single repaint (including
-        # the once-a-second status tick), with no memory of anywhere
-        # the user had moved it.
         self._custom_position = None
 
         self._status_lock = threading.Lock()
+
         self._latest_status = {
             "cpu": None,
             "ram": None,
@@ -339,6 +372,8 @@ class NativeOverlay:
     def start(self):
         if self._thread and self._thread.is_alive():
             return
+
+        self._stop.clear()
 
         self._thread = threading.Thread(
             target=self._run,
@@ -350,15 +385,9 @@ class NativeOverlay:
 
         self._ready.wait(timeout=5)
 
-        # Runs on its own thread, separate from the window's message
-        # pump. system_status_snapshot() calls psutil.cpu_percent with
-        # interval=0.5, which blocks for half a second -- if that ran
-        # from inside the WM_TIMER handler (on the message-pump thread,
-        # as it originally did), the window would be unable to process
-        # WM_LBUTTONDOWN/drag/click messages for 500ms out of every
-        # 1000ms tick, making it feel laggy or drop clicks. Polling
-        # here and just reading the cached result in WM_TIMER keeps
-        # the message pump free to stay responsive at all times.
+        if not self._hwnd:
+            return
+
         self._status_thread = threading.Thread(
             target=self._status_loop,
             name="JarvisNativeOverlayStatus",
@@ -367,17 +396,14 @@ class NativeOverlay:
 
         self._status_thread.start()
 
-    def _status_loop(self):
-        while not self._stop.is_set():
-            self._update_status()
-            self._stop.wait(timeout=1)
-
     def stop(self):
         self._stop.set()
 
-        if self._hwnd:
+        hwnd = self._hwnd
+
+        if hwnd:
             user32.PostMessageW(
-                self._hwnd,
+                hwnd,
                 WM_DESTROY,
                 0,
                 0,
@@ -407,16 +433,24 @@ class NativeOverlay:
         else:
             self.show()
 
+    def is_visible(self):
+        return self._visible
+
     def toggle_collapsed(self):
         self._collapsed = not self._collapsed
-
+        self._apply_window_geometry()
         self._render()
 
-    def _screen_geometry(self):
-        width = user32.GetSystemMetrics(0)
-        height = user32.GetSystemMetrics(1)
+    def _status_loop(self):
+        while not self._stop.is_set():
+            self._update_status()
+            self._stop.wait(timeout=1)
 
-        return width, height
+    def _screen_geometry(self):
+        return (
+            user32.GetSystemMetrics(0),
+            user32.GetSystemMetrics(1),
+        )
 
     def _window_size(self):
         if self._collapsed:
@@ -425,7 +459,10 @@ class NativeOverlay:
                 self.COLLAPSED_SIZE,
             )
 
-        return self.WIDTH, self.HEIGHT
+        return (
+            self.WIDTH,
+            self.HEIGHT,
+        )
 
     def _position(self):
         if self._custom_position is not None:
@@ -435,26 +472,38 @@ class NativeOverlay:
 
         width, _ = self._window_size()
 
-        x = (
-            screen_width
-            - width
-            - self.MARGIN
+        return (
+            screen_width - width - self.MARGIN,
+            self.MARGIN,
         )
 
-        y = self.MARGIN
+    def _apply_window_geometry(self):
+        if not self._hwnd:
+            return
 
-        return x, y
+        width, height = self._window_size()
+        x, y = self._position()
+
+        user32.SetWindowPos(
+            self._hwnd,
+            HWND_TOPMOST,
+            x,
+            y,
+            width,
+            height,
+            SWP_NOACTIVATE,
+        )
 
     def _load_font(self, size, bold=False):
-        candidates = [
-            Path("C:/Windows/Fonts/segoeui.ttf"),
-            Path("C:/Windows/Fonts/segoeuib.ttf"),
-        ]
+        filename = (
+            "segoeuib.ttf"
+            if bold
+            else "segoeui.ttf"
+        )
 
-        if bold:
-            path = candidates[1]
-        else:
-            path = candidates[0]
+        path = Path(
+            "C:/Windows/Fonts"
+        ) / filename
 
         try:
             return ImageFont.truetype(
@@ -478,15 +527,9 @@ class NativeOverlay:
 
         draw = ImageDraw.Draw(image)
 
-        # A single continuous rotation phase, shared by both draw
-        # calls below, so the icon's spin stays consistent whether
-        # it's being drawn as the whole collapsed window or as the
-        # small status indicator in the corner of the expanded panel.
-        # Driven by wall-clock time rather than a per-render counter
-        # so its speed doesn't change when extra renders happen (e.g.
-        # right after a collapse/expand click) on top of the regular
-        # 1-second timer tick.
-        rotation = (time.time() * 6) % 360
+        rotation = (
+            time.time() * 6
+        ) % 360
 
         if self._collapsed:
             self._draw_reactor_icon(
@@ -503,129 +546,128 @@ class NativeOverlay:
                 rotation,
             )
 
-        self._update_layered_window(
-            image
-        )
+        self._update_layered_window(image)
 
-    def _draw_reactor_icon(self, draw, cx, cy, rotation):
+    def _draw_reactor_icon(
+        self,
+        draw,
+        cx,
+        cy,
+        rotation,
+    ):
         """
-        A miniature arc-reactor-style icon -- soft glow, a thin
-        containment ring, four rotating spike triangles, and a
-        white-hot core -- used both as the panel's small status
-        indicator and as the overlay's entire visual identity when
-        collapsed. Replaces the earlier flat dot to match the app's
-        existing Iron-Man/reactor aesthetic (see the HUD's own
-        Three.js reactor visualization).
+        A miniature 2D re-interpretation of the HUD's own storm3d.js
+        "living core" -- the same layered core (hot white -> amber
+        HOT_COLOR -> theme-color glow) and the same idea of
+        concentric rings rotating at different speeds/directions,
+        using the real storm's actual default colors (its Three.js
+        scene inits themeColor to "#e08a2e", not the app chrome's
+        cyan accent).
 
-        The first version of this used thin 1px semi-transparent
-        rays, which at this icon's actual on-screen size (~20px)
-        were too faint to read as anything but a plain circle --
-        solid triangular spikes plus a stroked ring read clearly even
-        this small.
+        storm3d.js itself can't run here -- it's a live WebGL scene
+        (four independent GPU particle rings, ~50 orbiting fragment
+        sprites, canvas-generated glow textures, UnrealBloomPass
+        post-processing), and this overlay is raw GDI/ctypes with no
+        browser engine at all, by design (that's what makes its
+        transparency actually reliable, unlike the earlier
+        WebView2-based attempt). So this is a hand-authored miniature
+        matching its structure and palette, not a literal port.
         """
-        color = self.CYAN
+        theme = self.STORM_THEME
+        amber = self.STORM_AMBER
 
-        # Soft outer glow: PIL's ImageDraw has no built-in radial
-        # gradient fill, so this fakes one with a couple of
-        # concentric, decreasing-alpha circles.
-        for radius, alpha in ((12, 40), (9, 70)):
-            draw.ellipse(
-                (
-                    cx - radius,
-                    cy - radius,
-                    cx + radius,
-                    cy + radius,
-                ),
-                fill=(color[0], color[1], color[2], alpha),
-            )
-
-        # Containment ring -- an outline, not a fill, so it reads as
-        # a ring rather than another solid disc.
-        ring_radius = 9
-
+        # Layered core glow: soft theme-color outer, amber mid, hot
+        # white center -- flattened 2D version of buildCore()'s three
+        # additively-blended sprites in storm3d.js.
         draw.ellipse(
             (
-                cx - ring_radius,
-                cy - ring_radius,
-                cx + ring_radius,
-                cy + ring_radius,
+                cx - 10,
+                cy - 10,
+                cx + 10,
+                cy + 10,
             ),
-            outline=color,
-            width=1,
+            fill=(
+                theme[0],
+                theme[1],
+                theme[2],
+                55,
+            ),
         )
-
-        # Spikes: solid triangles radiating outward from the ring,
-        # evenly spaced, slowly rotating (see `rotation` in
-        # _render()). Filled triangles instead of thin lines so
-        # they're actually visible at this icon's small size.
-        spike_count = 4
-        spike_length = 5
-        spike_half_width = 2
-
-        for i in range(spike_count):
-            angle = math.radians(
-                rotation + (360 / spike_count) * i
-            )
-            perpendicular = angle + (math.pi / 2)
-
-            base_x = cx + ring_radius * math.cos(angle)
-            base_y = cy + ring_radius * math.sin(angle)
-
-            tip_x = cx + (
-                ring_radius + spike_length
-            ) * math.cos(angle)
-            tip_y = cy + (
-                ring_radius + spike_length
-            ) * math.sin(angle)
-
-            side1 = (
-                base_x
-                + spike_half_width * math.cos(perpendicular),
-                base_y
-                + spike_half_width * math.sin(perpendicular),
-            )
-            side2 = (
-                base_x
-                - spike_half_width * math.cos(perpendicular),
-                base_y
-                - spike_half_width * math.sin(perpendicular),
-            )
-
-            draw.polygon(
-                [(tip_x, tip_y), side1, side2],
-                fill=color,
-            )
-
-        # White-hot core, drawn last so it sits on top of everything.
-        core_radius = 3
 
         draw.ellipse(
             (
-                cx - core_radius,
-                cy - core_radius,
-                cx + core_radius,
-                cy + core_radius,
+                cx - 6,
+                cy - 6,
+                cx + 6,
+                cy + 6,
+            ),
+            fill=(
+                amber[0],
+                amber[1],
+                amber[2],
+                140,
+            ),
+        )
+
+        draw.ellipse(
+            (
+                cx - 2,
+                cy - 2,
+                cx + 2,
+                cy + 2,
             ),
             fill=(255, 255, 255, 255),
         )
 
-    def _draw_panel(self, draw, width, height, rotation):
-        radius = 10
-
-        bg = (
-            5,
-            8,
-            10,
-            self.BG_ALPHA,
+        # Two concentric rings of small dots, rotating at different
+        # speeds and in different directions -- a compact stand-in
+        # for the real version's four independently-rotating particle
+        # rings (90-190 particles each, unreadable at icon scale, so
+        # this keeps just the differential-rotation structure that
+        # actually reads at ~20px).
+        rings = (
+            # (radius, dot_count, speed_multiplier, dot_radius)
+            (7, 7, 1.0, 0.9),
+            (11, 9, -0.6, 0.7),
         )
 
-        border = (
-            58,
-            214,
-            255,
-            self.BORDER_ALPHA,
-        )
+        for (
+            radius,
+            count,
+            speed,
+            dot_radius,
+        ) in rings:
+            for index in range(count):
+                angle = math.radians(
+                    rotation * speed
+                    + (360 / count) * index
+                )
 
+                x = cx + radius * math.cos(angle)
+                y = cy + radius * math.sin(angle)
+
+                draw.ellipse(
+                    (
+                        x - dot_radius,
+                        y - dot_radius,
+                        x + dot_radius,
+                        y + dot_radius,
+                    ),
+                    fill=(
+                        theme[0],
+                        theme[1],
+                        theme[2],
+                        220,
+                    ),
+                )
+
+    def _draw_panel(
+        self,
+        draw,
+        width,
+        height,
+        rotation,
+    ):
         draw.rounded_rectangle(
             (
                 0,
@@ -633,9 +675,19 @@ class NativeOverlay:
                 width - 1,
                 height - 1,
             ),
-            radius=radius,
-            fill=bg,
-            outline=border,
+            radius=10,
+            fill=(
+                5,
+                8,
+                10,
+                self.BG_ALPHA,
+            ),
+            outline=(
+                58,
+                214,
+                255,
+                self.BORDER_ALPHA,
+            ),
             width=1,
         )
 
@@ -645,9 +697,7 @@ class NativeOverlay:
         )
 
         date_font = self._load_font(12)
-
         label_font = self._load_font(11)
-
         value_font = self._load_font(
             15,
             bold=True,
@@ -655,24 +705,18 @@ class NativeOverlay:
 
         now = datetime.now()
 
-        time_text = now.strftime(
-            "%I:%M:%S %p"
-        ).lstrip("0")
-
-        date_text = now.strftime(
-            "%a, %d %b"
-        )
-
         draw.text(
             (24, 20),
-            time_text,
+            now.strftime(
+                "%I:%M:%S %p"
+            ).lstrip("0"),
             font=time_font,
             fill=self.CYAN,
         )
 
         draw.text(
             (24, 59),
-            date_text,
+            now.strftime("%a, %d %b"),
             font=date_font,
             fill=self.DATE,
         )
@@ -700,15 +744,10 @@ class NativeOverlay:
             ),
         ]
 
-        x_positions = [
-            24,
-            82,
-            139,
-        ]
-
-        for index, (label, value) in enumerate(stats):
-            x = x_positions[index]
-
+        for x, (label, value) in zip(
+            (24, 82, 139),
+            stats,
+        ):
             draw.text(
                 (x, 96),
                 label,
@@ -730,7 +769,8 @@ class NativeOverlay:
             rotation,
         )
 
-    def _format_status(self, value):
+    @staticmethod
+    def _format_status(value):
         if value is None:
             return "--%"
 
@@ -740,25 +780,32 @@ class NativeOverlay:
         try:
             snapshot = self.status_provider()
 
-            with self._status_lock:
-                self._latest_status = {
-                    "cpu": snapshot.get(
-                        "cpu_percent"
-                    ),
-                    "ram": snapshot.get(
-                        "memory_percent"
-                    ),
-                    "disk": snapshot.get(
-                        "disk_percent"
-                    ),
-                }
+            values = {
+                "cpu": snapshot.get(
+                    "cpu_percent"
+                ),
+                "ram": snapshot.get(
+                    "memory_percent"
+                ),
+                "disk": snapshot.get(
+                    "disk_percent"
+                ),
+            }
 
-        except Exception:
-            pass
+            with self._status_lock:
+                self._latest_status = values
+
+        except Exception as exc:
+            print(
+                f"[Jarvis overlay] "
+                f"Status update failed: {exc}"
+            )
 
     def _read_status(self):
         with self._status_lock:
-            return dict(self._latest_status)
+            return dict(
+                self._latest_status
+            )
 
     def _update_layered_window(self, image):
         width, height = image.size
@@ -768,74 +815,12 @@ class NativeOverlay:
             "BGRA",
         )
 
-        class BITMAPINFOHEADER(
-            ctypes.Structure
-        ):
-            _fields_ = [
-                (
-                    "biSize",
-                    wintypes.DWORD,
-                ),
-                (
-                    "biWidth",
-                    wintypes.LONG,
-                ),
-                (
-                    "biHeight",
-                    wintypes.LONG,
-                ),
-                (
-                    "biPlanes",
-                    wintypes.WORD,
-                ),
-                (
-                    "biBitCount",
-                    wintypes.WORD,
-                ),
-                (
-                    "biCompression",
-                    wintypes.DWORD,
-                ),
-                (
-                    "biSizeImage",
-                    wintypes.DWORD,
-                ),
-                (
-                    "biXPelsPerMeter",
-                    wintypes.LONG,
-                ),
-                (
-                    "biYPelsPerMeter",
-                    wintypes.LONG,
-                ),
-                (
-                    "biClrUsed",
-                    wintypes.DWORD,
-                ),
-                (
-                    "biClrImportant",
-                    wintypes.DWORD,
-                ),
-            ]
-
-        class BITMAPINFO(
-            ctypes.Structure
-        ):
-            _fields_ = [
-                (
-                    "bmiHeader",
-                    BITMAPINFOHEADER,
-                ),
-                (
-                    "bmiColors",
-                    wintypes.DWORD * 3,
-                ),
-            ]
-
         bmi = BITMAPINFO()
 
-        bmi.bmiHeader.biSize = ctypes.sizeof(
-            BITMAPINFOHEADER
+        bmi.bmiHeader.biSize = (
+            ctypes.sizeof(
+                BITMAPINFOHEADER
+            )
         )
         bmi.bmiHeader.biWidth = width
         bmi.bmiHeader.biHeight = -height
@@ -845,9 +830,19 @@ class NativeOverlay:
 
         screen_dc = user32.GetDC(None)
 
+        if not screen_dc:
+            return
+
         mem_dc = gdi32.CreateCompatibleDC(
             screen_dc
         )
+
+        if not mem_dc:
+            user32.ReleaseDC(
+                None,
+                screen_dc,
+            )
+            return
 
         bits = ctypes.c_void_p()
 
@@ -868,95 +863,98 @@ class NativeOverlay:
             )
             return
 
-        ctypes.memmove(
-            bits,
-            raw,
-            len(raw),
-        )
+        try:
+            ctypes.memmove(
+                bits,
+                raw,
+                len(raw),
+            )
 
-        old_bitmap = gdi32.SelectObject(
-            mem_dc,
-            bitmap,
-        )
+            old_bitmap = gdi32.SelectObject(
+                mem_dc,
+                bitmap,
+            )
 
-        x, y = self._position()
+            if not old_bitmap:
+                return
 
-        dst = POINT(x, y)
-        size = SIZE(width, height)
-        src = POINT(0, 0)
+            x, y = self._position()
 
-        blend = BLENDFUNCTION(
-            AC_SRC_OVER,
-            0,
-            255,
-            AC_SRC_ALPHA,
-        )
+            destination = POINT(x, y)
+            size = SIZE(width, height)
+            source = POINT(0, 0)
 
-        user32.UpdateLayeredWindow(
-            self._hwnd,
-            screen_dc,
-            ctypes.byref(dst),
-            ctypes.byref(size),
-            mem_dc,
-            ctypes.byref(src),
-            0,
-            ctypes.byref(blend),
-            ULW_ALPHA,
-        )
+            blend = BLENDFUNCTION(
+                AC_SRC_OVER,
+                0,
+                255,
+                AC_SRC_ALPHA,
+            )
 
-        gdi32.SelectObject(
-            mem_dc,
-            old_bitmap,
-        )
+            user32.UpdateLayeredWindow(
+                self._hwnd,
+                screen_dc,
+                ctypes.byref(destination),
+                ctypes.byref(size),
+                mem_dc,
+                ctypes.byref(source),
+                0,
+                ctypes.byref(blend),
+                ULW_ALPHA,
+            )
 
-        gdi32.DeleteObject(bitmap)
-        gdi32.DeleteDC(mem_dc)
+            gdi32.SelectObject(
+                mem_dc,
+                old_bitmap,
+            )
 
-        user32.ReleaseDC(
-            None,
-            screen_dc,
-        )
+        finally:
+            gdi32.DeleteObject(bitmap)
+            gdi32.DeleteDC(mem_dc)
+            user32.ReleaseDC(
+                None,
+                screen_dc,
+            )
 
-    def _drag_and_maybe_toggle(self, hwnd, is_icon_click):
-        """
-        Hands off to Windows' own window-move loop -- the standard
-        trick for dragging a frameless window is faking a click on a
-        title bar it doesn't actually have (WM_NCLBUTTONDOWN with
-        HTCAPTION). That call blocks until the mouse is released
-        regardless of whether the user actually moved it, so a
-        before/after GetWindowRect comparison is what distinguishes a
-        real drag from a stationary click here -- there's no other
-        signal available from a single blocking call like this one.
-
-        A drag updates _custom_position so future repaints keep the
-        window where the user put it. A stationary click on the icon
-        toggles collapsed/expanded, same as before; a stationary
-        click elsewhere in the panel body does nothing, unchanged.
-        """
+    def _drag_and_maybe_toggle(
+        self,
+        hwnd,
+        is_icon_click,
+    ):
         start_rect = RECT()
-        user32.GetWindowRect(
+
+        if not user32.GetWindowRect(
             hwnd,
             ctypes.byref(start_rect),
-        )
+        ):
+            return
 
         user32.ReleaseCapture()
 
         user32.SendMessageW(
             hwnd,
-            0x00A1,
+            WM_NCLBUTTONDOWN,
             HTCAPTION,
             0,
         )
 
         end_rect = RECT()
-        user32.GetWindowRect(
+
+        if not user32.GetWindowRect(
             hwnd,
             ctypes.byref(end_rect),
-        )
+        ):
+            return
 
         moved = (
-            abs(end_rect.left - start_rect.left) > 2
-            or abs(end_rect.top - start_rect.top) > 2
+            abs(
+                end_rect.left
+                - start_rect.left
+            ) > 2
+            or abs(
+                end_rect.top
+                - start_rect.top
+            ) > 2
         )
 
         if moved:
@@ -984,9 +982,12 @@ class NativeOverlay:
             x = lparam & 0xFFFF
             y = (lparam >> 16) & 0xFFFF
 
-            is_icon = self._collapsed or (
-                x >= self.WIDTH - 40
-                and y <= 40
+            is_icon = (
+                self._collapsed
+                or (
+                    x >= self.WIDTH - 40
+                    and y <= 40
+                )
             )
 
             self._drag_and_maybe_toggle(
@@ -997,10 +998,6 @@ class NativeOverlay:
             return 0
 
         if msg == WM_TIMER:
-            # Status is polled on a separate thread (see start() /
-            # _status_loop()) precisely so this handler never blocks
-            # on the 500ms psutil call -- it only needs to repaint
-            # with whatever the latest cached reading is.
             self._render()
             return 0
 
@@ -1009,7 +1006,7 @@ class NativeOverlay:
 
             user32.KillTimer(
                 hwnd,
-                1,
+                self.TIMER_ID,
             )
 
             user32.PostQuitMessage(0)
@@ -1024,8 +1021,8 @@ class NativeOverlay:
         )
 
     def _run(self):
-        instance = kernel32.GetModuleHandleW(
-            None
+        instance = (
+            kernel32.GetModuleHandleW(None)
         )
 
         @WNDPROC
@@ -1046,7 +1043,10 @@ class NativeOverlay:
 
         cursor = user32.LoadCursorW(
             None,
-            ctypes.cast(IDC_ARROW, wintypes.LPCWSTR),
+            ctypes.cast(
+                IDC_ARROW,
+                wintypes.LPCWSTR,
+            ),
         )
 
         wnd_class = WNDCLASSW(
@@ -1067,21 +1067,15 @@ class NativeOverlay:
         )
 
         if not atom:
-            # ERROR_CLASS_ALREADY_EXISTS (1410) is harmless -- it just
-            # means a previous run's class is still registered under
-            # this process; CreateWindowExW works fine with it. Any
-            # other error means CreateWindowExW is about to fail too,
-            # so surface it now instead of failing silently below.
             error = kernel32.GetLastError()
+
             if error != 1410:
                 print(
-                    "[Jarvis overlay] RegisterClassW failed "
-                    f"(error {error}) -- the overlay window will "
-                    "not appear."
+                    "[Jarvis overlay] "
+                    f"RegisterClassW failed: {error}"
                 )
 
         width, height = self._window_size()
-
         x, y = self._position()
 
         ex_style = (
@@ -1090,28 +1084,31 @@ class NativeOverlay:
             | WS_EX_NOACTIVATE
         )
 
-        self._hwnd = user32.CreateWindowExW(
-            ex_style,
-            self._class_name,
-            "Jarvis Overlay",
-            WS_POPUP,
-            x,
-            y,
-            width,
-            height,
-            None,
-            None,
-            instance,
-            None,
+        self._hwnd = (
+            user32.CreateWindowExW(
+                ex_style,
+                self._class_name,
+                "Jarvis Overlay",
+                WS_POPUP,
+                x,
+                y,
+                width,
+                height,
+                None,
+                None,
+                instance,
+                None,
+            )
         )
 
         if not self._hwnd:
             error = kernel32.GetLastError()
+
             print(
-                "[Jarvis overlay] CreateWindowExW failed "
-                f"(error {error}) -- the overlay window will "
-                "not appear."
+                "[Jarvis overlay] "
+                f"CreateWindowExW failed: {error}"
             )
+
             self._ready.set()
             return
 
@@ -1131,8 +1128,8 @@ class NativeOverlay:
 
         user32.SetTimer(
             self._hwnd,
-            1,
-            1000,
+            self.TIMER_ID,
+            self.RENDER_INTERVAL_MS,
             None,
         )
 
