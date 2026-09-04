@@ -292,7 +292,9 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-252 tests. Covers confirmation gating, the chat/planning/streaming flow, memory storage on every exit path, file-safety edge cases (including sandbox-escape attempts), incremental indexing, insight/pattern detection, config loading, the local calendar store, battery reporting, mute/end-session/mode state, the location tool's fallback ordering (tested against MaxMind's real public GeoLite2 test database, not a mock), and the mode system specifically: every tool schema offered to the model in a given mode is checked to actually resolve in that mode's dispatch registry (the regression guard for the class of bug where a tool is offered but not wired up), creative project/document retrieval scoping (a project must stay searchable across all its documents, never narrowed to whichever was ingested most recently, and creative-project content must not leak into ordinary normal-mode conversations), coding mode's tools against real temporary files and real subprocess calls rather than mocks, and per-mode model resolution precedence. Heavy runtime dependencies (Ollama, ChromaDB, sentence-transformers) are mocked, so it stays fast and does not need the full model stack installed.
+378 tests. Covers confirmation gating, the chat/planning/streaming flow, memory storage on every exit path, file-safety edge cases (including sandbox-escape attempts), incremental indexing, insight/pattern detection, config loading, the local calendar store, battery reporting, mute/end-session/mode state, the location tool's fallback ordering (tested against MaxMind's real public GeoLite2 test database, not a mock), and the mode system specifically: every tool schema offered to the model in a given mode is checked to actually resolve in that mode's dispatch registry (the regression guard for the class of bug where a tool is offered but not wired up), relevance-based tool filtering (the narrowed list offered to the model is always a subset of the full registry and never drops the always-available session-control tools), creative project/document retrieval scoping (a project must stay searchable across all its documents, never narrowed to whichever was ingested most recently, and creative-project content must not leak into ordinary normal-mode conversations), coding mode's tools against real temporary files and real subprocess calls rather than mocks, and per-mode model resolution precedence. Heavy runtime dependencies (Ollama, ChromaDB, sentence-transformers) are mocked, so it stays fast and does not need the full model stack installed.
+
+Runs automatically on every push via GitHub Actions (`.github/workflows/tests.yml`).
 
 ## Project structure
 
@@ -302,14 +304,21 @@ Local-Jarvis/
 ├── start_jarvis_daemon.bat / start_jarvis_daemon.sh # Daemon launchers, share the venv with the above
 ├── main.py                              # CLI entry point / chat loop
 ├── jarvis_daemon.py                     # Headless daemon: JarvisLLM + HUD only, no terminal loop
+├── jarvis_backend_daemon.py             # Single launcher for backend.py (paired phone/PC devices) + the HUD, sharing one JarvisRuntime so they're never two independent assistants
+├── jarvis_tray.py                       # Windows system-tray app: pystray + pywebview host for the HUD, autostart via .vbs launcher
 ├── config.py                            # Central config defaults + jarvis_config.json loader
 ├── jarvis_config.example.json           # Copy to jarvis_config.json to override defaults
 ├── pytest.ini
 ├── geoip/
 │   └── README.md            # Where to place a downloaded GeoLite2-City.mmdb
+├── security/
+│   └── devices.py           # Trusted-device auth for the WebSocket/HUD transports: SHA-256-hashed tokens, bootstrap + peer-approval flow
 ├── brain/
 │   ├── llm.py               # Ollama wrapper, streaming tool-calling loop, short-term memory, plan-skip, per-mode model resolution
 │   ├── mode_config.py       # NORMAL/COMPANION/CREATIVE/CODING: prompt + tool schemas + dispatch functions + risky set, assembled from one module list per mode
+│   ├── fast_router.py       # Cheap pre-LLM routing for trivial turns
+│   ├── tool_relevance.py    # Embedding-based per-turn narrowing of the tool list offered to the model once a mode's registry exceeds a configured size
+│   ├── runtime.py           # Transport-independent JarvisRuntime shared by CLI, daemon, and tray front ends
 │   └── session.py           # Shared confirm-callback + HUD/console plumbing used by main.py and jarvis_daemon.py
 ├── memory/
 │   ├── shared.py            # Shared embedder + ChromaDB client singletons
@@ -358,6 +367,7 @@ Local-Jarvis/
 │   ├── splash.py             # Terminal boot animation
 │   ├── thinking.py           # Inline "thinking" pulse while waiting on a reply
 │   ├── hud_server.py         # HTTP + WebSocket bridge for the graphical HUD
+│   ├── native_overlay.py     # Floating always-on-top desktop overlay: raw Win32 GDI (UpdateLayeredWindow/ULW_ALPHA) for true per-pixel transparency, no browser engine involved
 │   └── hud/static/           # HUD frontend (reactor/storm visuals, chat panel)
 ├── tests/                  # pytest suite
 ├── workspace/              # File-tool sandbox (gitignored)
@@ -382,8 +392,9 @@ Local-Jarvis/
 | 10, First new-tools tier | Done | Battery, location (OS-native with offline fallback), calendar, PDF opening, datasheet search, media control, now playing, mute and end-session |
 | 11, Second new-tools tier | Done | Weather, Google Maps, nearby places, routing (ORS + keyless fallback) |
 | 12, Multi-mode assistant | Done | Companion mode (open conversation, no forced tools), creative mode (document- and project-scoped writing collaboration), coding mode (test running, linting, code search against any repo), per-mode model override |
+| 13, Desktop app shell | Done | Windows system-tray app (`jarvis_tray.py`, pystray + pywebview, autostart via `.vbs` launcher) hosting the HUD in a native window; a native Win32 floating overlay (`ui/native_overlay.py`) built on raw GDI for true per-pixel transparency; trusted-device authentication (`security/devices.py`) shared across every transport; per-turn tool-relevance filtering (`brain/tool_relevance.py`) so a local model isn't handed the full 65+-schema registry on every message |
 
-Bigger directions still on the table: webcam capture and an X-ray-style vision effect built on the existing Moondream pipeline, a HUD widget system (text notes, open/close/reset, a home dashboard widget, an in-HUD PDF viewer, map control), a system tray application with always-listening mode decoupled from the CLI, a floating transparent desktop overlay, and local image generation through a diffusion backend such as Automatic1111 or ComfyUI. Smart home integration and 3D printing support are explicitly out of scope for this project.
+Bigger directions still on the table: webcam capture and an X-ray-style vision effect built on the existing Moondream pipeline, a HUD widget system (text notes, open/close/reset, a home dashboard widget, an in-HUD PDF viewer, map control), and local image generation through a diffusion backend such as Automatic1111 or ComfyUI. Smart home integration and 3D printing support are explicitly out of scope for this project.
 
 ## License
 
