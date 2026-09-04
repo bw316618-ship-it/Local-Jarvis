@@ -12,6 +12,7 @@ the project boundary because old indexed chunks can contain stale metadata.
 """
 
 import json
+import sys
 from pathlib import Path
 
 from memory.shared import get_embedder, get_client
@@ -72,8 +73,14 @@ def index_one_file(
 
     try:
         collection.delete(where={"source": key})
-    except Exception:
-        pass
+    except Exception as e:
+        # Not fatal -- re-indexing still proceeds below -- but a failed
+        # delete here means the OLD chunks for this file are never
+        # removed, so this file's search results can silently accumulate
+        # duplicate/stale chunks over repeated re-indexes. Surface it
+        # instead of swallowing it outright so that's diagnosable.
+        print(f"[document_store] Warning: failed to clear old chunks for "
+              f"{key}: {e}", file=sys.stderr)
 
     chunks = list(chunk_text(text, chunk_size, chunk_overlap))
 
