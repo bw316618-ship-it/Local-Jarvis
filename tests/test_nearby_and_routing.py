@@ -69,6 +69,43 @@ def test_find_nearby_place_requires_a_category():
     assert "required" in nb.find_nearby_place("").lower()
 
 
+def test_find_nearby_place_uses_supplied_center_instead_of_device_location(monkeypatch):
+    """Regression test: the HUD map search box used to always search
+    around get_coordinates() (the device's real-world location), silently
+    returning nothing if the map had been panned somewhere else. A supplied
+    `center` (the map's own viewport center) must be used instead, and
+    get_coordinates() must not even be called."""
+    PARIS = {"lat": 48.8566, "lon": 2.3522}
+
+    called_get_coordinates = []
+    monkeypatch.setattr(
+        nb,
+        "get_coordinates",
+        lambda: called_get_coordinates.append(True) or LONDON,
+    )
+
+    with patch.object(net.requests, "post") as mock_post:
+        mock_post.return_value = MagicMock(status_code=200, json=lambda: {"elements": []})
+        mock_post.return_value.raise_for_status = lambda: None
+        nb.find_nearby_place("cafe", center=PARIS)
+
+    assert not called_get_coordinates, "a supplied center must skip get_coordinates() entirely"
+
+    query_sent = mock_post.call_args.kwargs["data"]["data"]
+    assert "48.8566" in query_sent and "2.3522" in query_sent
+
+
+def test_find_nearby_place_falls_back_to_device_location_without_a_center(monkeypatch):
+    monkeypatch.setattr(nb, "get_coordinates", lambda: LONDON)
+    with patch.object(net.requests, "post") as mock_post:
+        mock_post.return_value = MagicMock(status_code=200, json=lambda: {"elements": []})
+        mock_post.return_value.raise_for_status = lambda: None
+        nb.find_nearby_place("cafe")
+
+    query_sent = mock_post.call_args.kwargs["data"]["data"]
+    assert "51.5074" in query_sent
+
+
 # --- get_route --------------------------------------------------------
 
 def test_get_route_via_ors_when_key_configured(monkeypatch):

@@ -895,7 +895,22 @@
     setExpanded(true, { preserveView: true });
     setStatus(`Searching "${trimmed}"...`);
 
-    if (!sendToBackend({ type: "map_search", query: trimmed })) {
+    // Search around wherever the map is actually showing, not always the
+    // device's real-world location. Without this, panning the map away
+    // from where you physically are and searching for something you can
+    // see on screen would query Overpass around your device's location
+    // instead, and silently come back empty.
+    const center = map
+      ? { lat: map.getCenter().lat, lon: map.getCenter().lng }
+      : null;
+
+    if (
+      !sendToBackend({
+        type: "map_search",
+        query: trimmed,
+        center,
+      })
+    ) {
       setStatus("Not connected -- can't search right now.");
     }
   }

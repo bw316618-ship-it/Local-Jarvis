@@ -30,6 +30,7 @@ class JarvisRuntime:
         voice=None,
         speak_replies: bool = False,
         session_log: list = None,
+        map_context: str = None,
     ) -> str:
         """
         Process one user message through the core assistant.
@@ -62,4 +63,5 @@ class JarvisRuntime:
             text,
             speak_replies=speak_replies,
             session_log=session_log,
+            map_context=map_context,
         )

@@ -1012,6 +1012,7 @@ class HUDBridge:
                 args=(
                     query,
                     data.get("radius_km"),
+                    data.get("center"),
                 ),
                 daemon=True,
             ).start()
@@ -1191,23 +1192,29 @@ class HUDBridge:
                 )
                 return
 
-            runtime_text = text
+            # map_context is kept out of the text passed to
+            # handle_message()/chat() -- it used to be string-concatenated
+            # onto `text` here, which meant every classifier that inspects
+            # user_message (instant-response matching, simple-conversation
+            # matching, the multi-step/planning heuristic) was actually
+            # looking at "{text}\n\n[HUD MAP CONTEXT]\n{json blob}", not
+            # your actual message. A JSON object's commas alone were enough
+            # to trip the multi-step check on every single turn. It's now
+            # threaded through as its own parameter and only surfaces in
+            # the final LLM prompt, same as facts_context/past_context.
+            map_context_text = None
 
             if isinstance(map_context, dict):
                 try:
-                    runtime_text = (
-                        f"{text}\n\n"
-                        "[HUD MAP CONTEXT]\n"
-                        f"{json.dumps(map_context)}\n"
-                        "[END HUD MAP CONTEXT]"
-                    )
+                    map_context_text = json.dumps(map_context)
                 except Exception:
-                    runtime_text = text
+                    map_context_text = None
 
             try:
                 self._runtime.handle_message(
-                    runtime_text,
+                    text,
                     hud=self,
+                    map_context=map_context_text,
                 )
 
                 for action in drain_map_actions():
@@ -1240,11 +1247,13 @@ class HUDBridge:
         self,
         query,
         radius_km=None,
+        center=None,
     ):
         try:
             summary = find_nearby_place(
                 query,
                 radius_km,
+                center=center,
             )
 
             for action in drain_map_actions():

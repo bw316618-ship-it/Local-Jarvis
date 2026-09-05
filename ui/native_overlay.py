@@ -1,6 +1,5 @@
 import ctypes
 import ctypes.wintypes as wintypes
-import math
 import threading
 import time
 from datetime import datetime
@@ -333,13 +332,6 @@ class NativeOverlay:
     DATE = (143, 185, 196, 255)
     LABEL = (111, 151, 162, 255)
 
-    # Exact RGB conversion of storm3d.js's own constants -- its
-    # default themeColor ("#e08a2e") and HOT_COLOR (0xfff6e0) -- so
-    # the miniature icon actually matches the real storm's palette
-    # rather than an approximation.
-    STORM_THEME = (224, 138, 46, 255)
-    STORM_AMBER = (255, 246, 224, 255)
-
     TIMER_ID = 1
 
     def __init__(self, status_provider):
@@ -556,110 +548,91 @@ class NativeOverlay:
         rotation,
     ):
         """
-        A miniature 2D re-interpretation of the HUD's own storm3d.js
-        "living core" -- the same layered core (hot white -> amber
-        HOT_COLOR -> theme-color glow) and the same idea of
-        concentric rings rotating at different speeds/directions,
-        using the real storm's actual default colors (its Three.js
-        scene inits themeColor to "#e08a2e", not the app chrome's
-        cyan accent).
+        A miniature 2D re-interpretation of the HUD's own #reactor CSS
+        mode (ui/hud/static/hud.css) -- three partial-border rings
+        (.ring-outer/.ring-mid/.ring-inner), each spinning at its own
+        rate and direction with a gap on opposite sides (border-color:
+        transparent on two opposing sides), plus the .core radial-
+        gradient glow. Previously this hand-drew a miniature of the
+        storm3d.js WebGL "living core" instead; this version matches
+        the reactor's own structure and its default idle glow color
+        (--glow: #3ad6ff) rather than the storm's warm amber palette.
 
-        storm3d.js itself can't run here -- it's a live WebGL scene
-        (four independent GPU particle rings, ~50 orbiting fragment
-        sprites, canvas-generated glow textures, UnrealBloomPass
-        post-processing), and this overlay is raw GDI/ctypes with no
-        browser engine at all, by design (that's what makes its
-        transparency actually reliable, unlike the earlier
-        WebView2-based attempt). So this is a hand-authored miniature
-        matching its structure and palette, not a literal port.
+        This overlay has no visibility into Jarvis's live conversation
+        state (only cpu/ram/disk get piped in via status_provider), so
+        it always renders the reactor's idle-state color rather than
+        switching palette with listening/thinking/tool/error the way
+        the browser HUD does.
         """
-        theme = self.STORM_THEME
-        amber = self.STORM_AMBER
+        glow = self.CYAN  # (58, 214, 255, 255) == hud.css's --glow: #3ad6ff
 
-        # Layered core glow: soft theme-color outer, amber mid, hot
-        # white center -- flattened 2D version of buildCore()'s three
-        # additively-blended sprites in storm3d.js.
+        outer_r = 12
+        mid_r = outer_r * 0.84   # .ring-mid: inset 8% each side
+        inner_r = outer_r * 0.6  # .ring-inner: inset 20% each side
+        core_r = outer_r * 0.32  # .core: 118px / 380px stage width
+
+        def ring(radius, visible_arcs, speed, width):
+            # visible_arcs are (start, end) degree pairs using the same
+            # 0=east/90=south/180=west/270=north convention PIL's arc()
+            # already uses, so they map directly onto which CSS border
+            # sides are transparent (a "gap") vs colored (drawn here).
+            for start, end in visible_arcs:
+                draw.arc(
+                    (
+                        cx - radius,
+                        cy - radius,
+                        cx + radius,
+                        cy + radius,
+                    ),
+                    start=start + rotation * speed,
+                    end=end + rotation * speed,
+                    fill=glow,
+                    width=width,
+                )
+
+        # .ring-outer: border-left/right transparent -> top+bottom arcs
+        # visible, spinning clockwise (css: animation: spin).
+        ring(outer_r, [(225, 315), (45, 135)], speed=1.0, width=1)
+
+        # .ring-mid: border-top/bottom transparent -> left+right arcs
+        # visible, spinning counter-clockwise and faster (spin-reverse).
+        ring(mid_r, [(-45, 45), (135, 225)], speed=-1.5, width=2)
+
+        # .ring-inner: border-left transparent only -> everything except
+        # the west quarter, spinning clockwise, fastest of the three.
+        ring(inner_r, [(-135, 135)], speed=1.6, width=1)
+
+        # .core: flattened version of its radial-gradient(white -> glow
+        # -> transparent), as three concentric solid-alpha ellipses.
         draw.ellipse(
             (
-                cx - 10,
-                cy - 10,
-                cx + 10,
-                cy + 10,
+                cx - core_r,
+                cy - core_r,
+                cx + core_r,
+                cy + core_r,
             ),
-            fill=(
-                theme[0],
-                theme[1],
-                theme[2],
-                55,
-            ),
+            fill=(glow[0], glow[1], glow[2], 90),
         )
 
         draw.ellipse(
             (
-                cx - 6,
-                cy - 6,
-                cx + 6,
-                cy + 6,
+                cx - core_r * 0.6,
+                cy - core_r * 0.6,
+                cx + core_r * 0.6,
+                cy + core_r * 0.6,
             ),
-            fill=(
-                amber[0],
-                amber[1],
-                amber[2],
-                140,
-            ),
+            fill=(glow[0], glow[1], glow[2], 200),
         )
 
         draw.ellipse(
             (
-                cx - 2,
-                cy - 2,
-                cx + 2,
-                cy + 2,
+                cx - core_r * 0.25,
+                cy - core_r * 0.25,
+                cx + core_r * 0.25,
+                cy + core_r * 0.25,
             ),
             fill=(255, 255, 255, 255),
         )
-
-        # Two concentric rings of small dots, rotating at different
-        # speeds and in different directions -- a compact stand-in
-        # for the real version's four independently-rotating particle
-        # rings (90-190 particles each, unreadable at icon scale, so
-        # this keeps just the differential-rotation structure that
-        # actually reads at ~20px).
-        rings = (
-            # (radius, dot_count, speed_multiplier, dot_radius)
-            (7, 7, 1.0, 0.9),
-            (11, 9, -0.6, 0.7),
-        )
-
-        for (
-            radius,
-            count,
-            speed,
-            dot_radius,
-        ) in rings:
-            for index in range(count):
-                angle = math.radians(
-                    rotation * speed
-                    + (360 / count) * index
-                )
-
-                x = cx + radius * math.cos(angle)
-                y = cy + radius * math.sin(angle)
-
-                draw.ellipse(
-                    (
-                        x - dot_radius,
-                        y - dot_radius,
-                        x + dot_radius,
-                        y + dot_radius,
-                    ),
-                    fill=(
-                        theme[0],
-                        theme[1],
-                        theme[2],
-                        220,
-                    ),
-                )
 
     def _draw_panel(
         self,

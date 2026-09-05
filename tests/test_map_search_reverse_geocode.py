@@ -50,7 +50,7 @@ def test_search_passes_query_and_radius_through():
          patch.object(hud_server_module, "drain_map_actions", return_value=[]):
         bridge._handle_map_search("pizza", 2.5)
 
-    fake_find.assert_called_once_with("pizza", 2.5)
+    fake_find.assert_called_once_with("pizza", 2.5, center=None)
 
 
 def test_search_failure_broadcasts_error_result_not_a_crash():
@@ -150,7 +150,7 @@ def test_incoming_map_search_spawns_a_thread_not_a_blocking_call():
     fake_thread_cls.assert_called_once()
     _, kwargs = fake_thread_cls.call_args
     assert kwargs["target"] == bridge._handle_map_search
-    assert kwargs["args"] == ("coffee", None)
+    assert kwargs["args"] == ("coffee", None, None)
     fake_thread.start.assert_called_once()
 
 

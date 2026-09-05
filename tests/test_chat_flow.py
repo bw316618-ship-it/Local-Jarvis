@@ -31,6 +31,70 @@ def make_jarvis():
     return jarvis
 
 
+def test_map_context_never_defeats_the_instant_response_fast_path(monkeypatch):
+    """Regression test for the planning-mode-on-everything bug: map_context
+    used to get string-concatenated onto user_message before it ever reached
+    get_instant_response()/classify(), so a JSON blob glued onto "hi" no
+    longer matched the exact-string instant-response lookup, and its commas
+    tripped the multi-step heuristic instead. map_context must be threaded
+    through as its own parameter and never touch what the fast-path/
+    classifiers see."""
+    jarvis = make_jarvis()
+    remembered = []
+
+    fake_client = MagicMock()
+    jarvis.client = fake_client
+
+    monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: remembered.append((u, r)))
+
+    steps = []
+    result = jarvis.chat(
+        "hi",
+        on_step=steps.append,
+        map_context='{"open": true, "visible": true, "latitude": 1.0, "longitude": 2.0, "zoom": 14, "marker_count": 3}',
+    )
+
+    assert result == "Hello."
+    assert steps == [], "map_context alone must never trigger planning"
+    assert not fake_client.chat.called, "a real greeting should never even reach the model"
+
+
+
+def test_map_context_appears_in_prompt_but_not_in_planning_check(monkeypatch):
+    """map_context should still reach the model -- just as its own labelled
+    block in the final prompt (same pattern as context/past_context/
+    facts_context), not mixed into user_message."""
+    jarvis = make_jarvis()
+    captured = []
+
+    def fake_chat(model, messages, tools=None, stream=False, **kwargs):
+        captured.append(messages[1]["content"])
+        return _stream("Sure.", None)
+
+    fake_client = MagicMock()
+    fake_client.chat.side_effect = fake_chat
+    jarvis.client = fake_client
+
+    monkeypatch.setattr(llm_module, "remember_turn", lambda u, r: None)
+    monkeypatch.setattr(llm_module, "recall", lambda q, k=3, **kwargs: [])
+    monkeypatch.setattr(llm_module, "recall_facts", lambda q, k=3, **kwargs: [])
+
+    map_blob = '{"latitude": 1.0, "longitude": 2.0, "zoom": 14, "marker_count": 3, "open": true}'
+
+    steps = []
+    jarvis.chat(
+        "what's the capital of France",
+        on_step=steps.append,
+        map_context=map_blob,
+    )
+
+    assert map_blob in captured[0]
+    assert not any(
+        s.startswith("Plan:") for s in steps
+    ), "a plain question with map context attached must not trigger planning"
+
+
+
 def test_simple_question_skips_plan_and_tools(monkeypatch):
     jarvis = make_jarvis()
     remembered = []

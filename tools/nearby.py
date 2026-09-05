@@ -569,11 +569,20 @@ def _publish_markers(
 def find_nearby_place(
     category,
     radius_km=DEFAULT_RADIUS_KM,
+    center=None,
 ):
     """
     Find nearby places matching a category.
 
     Results are both returned as text and published to the HUD map.
+
+    `center`, when given a {"lat": ..., "lon": ...} dict, searches around
+    that point instead of the device's real-world location -- this is what
+    lets the HUD map search box search around wherever the map is actually
+    panned/zoomed to. Without it, a search from the map's search box would
+    always center on the device's own location via get_coordinates(),
+    silently returning nothing when the map view and the device's real
+    location aren't the same place.
     """
 
     category_key = (
@@ -599,13 +608,25 @@ def find_nearby_place(
     except (TypeError, ValueError):
         radius_km = DEFAULT_RADIUS_KM
 
-    try:
-        here = get_coordinates()
-    except RuntimeError as exc:
-        return (
-            "Could not determine current "
-            f"location:\n{exc}"
-        )
+    here = None
+
+    if isinstance(center, dict):
+        try:
+            here = {
+                "lat": float(center["lat"]),
+                "lon": float(center["lon"]),
+            }
+        except (TypeError, KeyError, ValueError):
+            here = None
+
+    if here is None:
+        try:
+            here = get_coordinates()
+        except RuntimeError as exc:
+            return (
+                "Could not determine current "
+                f"location:\n{exc}"
+            )
 
     tag_filters = CATEGORY_TAGS.get(category_key)
 

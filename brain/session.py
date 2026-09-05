@@ -279,6 +279,7 @@ class JarvisSession:
         text: str,
         speak_replies: bool = False,
         session_log: list = None,
+        map_context: str = None,
     ) -> str:
 
         if session_log is not None:
@@ -335,6 +336,7 @@ class JarvisSession:
                 text,
                 on_step=on_step,
                 on_sentence=on_sentence,
+                map_context=map_context,
             )
 
             _first_output_once()
