@@ -56,11 +56,13 @@ WS_EX_NOACTIVATE = 0x08000000
 
 WM_DESTROY = 0x0002
 WM_LBUTTONDOWN = 0x0201
+WM_NCLBUTTONDOWN = 0x00A1
 WM_TIMER = 0x0113
 WM_NCHITTEST = 0x0084
 WM_MOUSEACTIVATE = 0x0021
 
 HTCLIENT = 1
+HTCAPTION = 2
 MA_NOACTIVATE = 3
 
 SW_SHOWNOACTIVATE = 4
@@ -68,6 +70,8 @@ SW_HIDE = 0
 
 SWP_NOACTIVATE = 0x0010
 SWP_SHOWWINDOW = 0x0040
+SWP_NOMOVE = 0x0002
+SWP_NOSIZE = 0x0001
 
 HWND_TOPMOST = -1
 
@@ -84,6 +88,15 @@ class POINT(ctypes.Structure):
 
 class SIZE(ctypes.Structure):
     _fields_ = [("cx", wintypes.LONG), ("cy", wintypes.LONG)]
+
+
+class RECT(ctypes.Structure):
+    _fields_ = [
+        ("left", wintypes.LONG),
+        ("top", wintypes.LONG),
+        ("right", wintypes.LONG),
+        ("bottom", wintypes.LONG),
+    ]
 
 
 class BLENDFUNCTION(ctypes.Structure):
@@ -170,6 +183,12 @@ user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, WPARAM, LPARAM]
 user32.PostMessageW.restype = wintypes.BOOL
 user32.PostQuitMessage.argtypes = [ctypes.c_int]
 user32.PostQuitMessage.restype = None
+user32.ReleaseCapture.argtypes = []
+user32.ReleaseCapture.restype = wintypes.BOOL
+user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, WPARAM, LPARAM]
+user32.SendMessageW.restype = LRESULT
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
+user32.GetWindowRect.restype = wintypes.BOOL
 user32.SetTimer.argtypes = [
     wintypes.HWND, ctypes.c_size_t, wintypes.UINT, wintypes.LPVOID,
 ]
@@ -223,10 +242,10 @@ class DesktopPet:
     like release()/call_home() are safe to call from any thread -- they
     just flip a flag that the render tick picks up."""
 
-    WINDOW_SIZE = 96          # fixed HWND size; house art and pet sprite both fit inside it
-    SPRITE_SCALE = 4
+    WINDOW_SIZE = 180         # fixed HWND size; house art and pet sprite both fit inside it
+    SPRITE_SCALE = 8
     SPRITE_BASE = 18          # matches Desktop-Pet's BASE_SIZE
-    SPRITE_SIZE = SPRITE_BASE * SPRITE_SCALE  # 72
+    SPRITE_SIZE = SPRITE_BASE * SPRITE_SCALE  # 144
 
     MAX_SPEED = 3.0
     STEER_SMOOTHING = 0.2
@@ -240,6 +259,8 @@ class DesktopPet:
     TIMER_RENDER = 1
     TIMER_ANIM = 2
     TIMER_BEHAVIOR = 3
+    TIMER_TOPMOST = 4
+    TOPMOST_INTERVAL_MS = 2000  # periodically re-assert topmost; some apps steal the topmost band
 
     HOUSE_MARGIN = 24  # distance from bottom-right corner, matches native_overlay's MARGIN
 
@@ -461,6 +482,45 @@ class DesktopPet:
             if self.on_home:
                 self.on_home()
 
+    # -------------------------
+    # Dragging (ported from native_overlay.py's _drag_and_maybe_toggle:
+    # ReleaseCapture + WM_NCLBUTTONDOWN/HTCAPTION hands the drag off to
+    # Windows itself, since a borderless WS_POPUP has no caption to grab.
+    # Comparing the window rect before/after tells us drag vs. plain click.)
+    # -------------------------
+    def _drag_and_maybe_act(self, hwnd):
+        start_rect = RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(start_rect)):
+            return
+
+        user32.ReleaseCapture()
+        user32.SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)
+
+        end_rect = RECT()
+        if not user32.GetWindowRect(hwnd, ctypes.byref(end_rect)):
+            return
+
+        moved = (
+            abs(end_rect.left - start_rect.left) > 2
+            or abs(end_rect.top - start_rect.top) > 2
+        )
+
+        with self._state_lock:
+            state = self.state
+
+        if moved:
+            self._x, self._y = end_rect.left, end_rect.top
+            if state == ASLEEP:
+                # dragging while asleep repositions the house itself
+                self._house_x, self._house_y = end_rect.left, end_rect.top
+            return
+
+        # not a drag -- treat as a click
+        if state == ASLEEP:
+            self.release()
+        elif state == ROAMING:
+            self.call_home()
+
     def _current_anim_key(self):
         moving = abs(self.vx) > 0.5 or abs(self.vy) > 0.5
         side = "right" if self.facing_right else "left"
@@ -552,13 +612,7 @@ class DesktopPet:
         if msg == WM_NCHITTEST:
             return HTCLIENT
         if msg == WM_LBUTTONDOWN:
-            with self._state_lock:
-                asleep = self.state == ASLEEP
-                out = self.state == ROAMING
-            if asleep:
-                self.release()
-            elif out:
-                self.call_home()
+            self._drag_and_maybe_act(hwnd)
             return 0
         if msg == WM_TIMER:
             if wparam == self.TIMER_RENDER:
@@ -569,12 +623,18 @@ class DesktopPet:
                 with self._state_lock:
                     if self.state == ROAMING:
                         self._choose_target()
+            elif wparam == self.TIMER_TOPMOST:
+                user32.SetWindowPos(
+                    hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                    SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
+                )
             return 0
         if msg == WM_DESTROY:
             self._stop.set()
             user32.KillTimer(hwnd, self.TIMER_RENDER)
             user32.KillTimer(hwnd, self.TIMER_ANIM)
             user32.KillTimer(hwnd, self.TIMER_BEHAVIOR)
+            user32.KillTimer(hwnd, self.TIMER_TOPMOST)
             user32.PostQuitMessage(0)
             return 0
         return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
@@ -621,6 +681,7 @@ class DesktopPet:
         user32.SetTimer(self._hwnd, self.TIMER_RENDER, self.RENDER_INTERVAL_MS, None)
         user32.SetTimer(self._hwnd, self.TIMER_ANIM, self.ANIM_INTERVAL_MS, None)
         user32.SetTimer(self._hwnd, self.TIMER_BEHAVIOR, self.BEHAVIOR_INTERVAL_MS, None)
+        user32.SetTimer(self._hwnd, self.TIMER_TOPMOST, self.TOPMOST_INTERVAL_MS, None)
 
         self._ready.set()
 
