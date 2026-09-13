@@ -1,15 +1,7 @@
 """Mode configuration for Jarvis.
 
 Each mode is assembled from (schemas, functions, risky) triples pulled
-straight from the underlying tool modules -- never listed separately.
-This is deliberate: the project's one critical bug so far (CREATIVE mode
-offering PROJECT_TOOL_SCHEMAS to the model while brain/llm.py's dispatch
-registry never got the matching PROJECT_TOOL_FUNCTIONS) happened because
-schemas were assembled here while functions were hand-maintained in a
-separate if/elif chain in brain/llm.py. Building "tools", "functions",
-and "risky" from the same _assemble() call over the same module list
-makes that class of bug structurally impossible going forward: you
-cannot add a schema without its function coming along for free.
+straight from the underlying tool modules.
 """
 
 from tools.tools import TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS
@@ -50,9 +42,25 @@ COMPANION_PROMPT = (
 CREATIVE_PROMPT = (
     "You are J.A.R.V.I.S. in creative writing mode. Work as a rigorous "
     "creative collaborator on the user's active creative scope.\n\n"
+    "HARD PROJECT BOUNDARY: the active creative project is an isolated "
+    "workspace. Never import facts, documents, filenames, characters, plots, "
+    "themes, or other canon from another project, another file, the user's "
+    "Downloads folder, or unrelated conversation history. A file merely found "
+    "on disk is not part of the active project. Only documents registered in "
+    "the active project are project canon.\n\n"
+    "The active project/document state supplied by the application is "
+    "authoritative. If asked which project is active, which files belong to "
+    "it, or what the project contains, use get_creative_project rather than "
+    "inferring from recent conversation, filenames, Downloads, or semantic "
+    "memory. Treat that tool result as authoritative. Never invent a "
+    "document, project, story, or piece of canon that the tool did not report.\n\n"
     "The active document or project is the primary source of truth for "
     "story-specific details. Retrieved source material is canon. New ideas "
     "are proposals and must not be presented as established facts.\n\n"
+    "Generic long-term conversation memory and remembered facts are not "
+    "sources of creative-project canon. Recent conversation may provide "
+    "continuity only when it is clearly within the current creative scope. "
+    "It must never override the active project/document state.\n\n"
     "When the user provides a local story/PDF/TXT/Markdown path, the application "
     "handles ingestion. Do not use generic file tools to manipulate the source.\n\n"
     "For retrieval, get_creative_context/build_chapter_ideas_context/"
@@ -108,10 +116,7 @@ CODING_PROMPT = (
     "not actually retrieved this turn."
 )
 
-
 def _assemble(*groups):
-    """Combine any number of (schemas, functions, risky) triples into one
-    mode's (tools, functions, risky). The only way tools enter a mode."""
     schemas = []
     functions = {}
     risky = set()
@@ -120,7 +125,6 @@ def _assemble(*groups):
         functions = {**functions, **f}
         risky = risky | set(r)
     return schemas, functions, risky
-
 
 _SESSION = (SESSION_TOOL_SCHEMAS, SESSION_TOOL_FUNCTIONS, SESSION_RISKY_TOOLS)
 _CREATIVE = (CREATIVE_TOOL_SCHEMAS, CREATIVE_TOOL_FUNCTIONS, CREATIVE_RISKY_TOOLS)
@@ -132,25 +136,11 @@ _GIT = (GIT_TOOL_SCHEMAS, GIT_TOOL_FUNCTIONS, GIT_RISKY_TOOLS)
 _WORKSPACE_FILES = (FILE_TOOL_SCHEMAS, FILE_TOOL_FUNCTIONS, set())
 _CODING = (CODING_TOOL_SCHEMAS, CODING_TOOL_FUNCTIONS, CODING_RISKY_TOOLS)
 
-# Groups per multi-module mode. Deliberately *not* pre-assembled into a
-# static dict at import time -- get_mode_config() below calls _assemble()
-# on these fresh on every lookup instead. Two reasons: (1) it keeps
-# dict/set membership dynamic, since a group here holds a reference to the
-# real module-level dict (e.g. CREATIVE_GENERATION_TOOL_FUNCTIONS), and
-# {**d} at call time reads that dict's current contents -- useful for
-# tests that monkeypatch a single tool's implementation and expect
-# dispatch to see it; (2) the cost is a handful of dict merges once per
-# chat turn, immaterial next to an LLM round-trip.
 _MULTI_MODULE_GROUPS = {
     CREATIVE: (_SESSION, _CREATIVE, _PROJECT, _CREATIVE_GENERATION),
     CODING: (_SESSION, _WORKSPACE_FILES, _GIT, _CODING),
 }
 
-# NORMAL and COMPANION each pull from exactly one module, so there's no
-# "forgot to merge the second module's functions" failure mode possible --
-# assigned directly (preserving object identity with the source module's
-# constants, which some tests rely on) rather than routed through
-# _assemble(), which always returns fresh containers.
 _SINGLE_MODULE_TOOLS = {
     NORMAL: (TOOL_SCHEMAS, TOOL_FUNCTIONS, RISKY_TOOLS),
     COMPANION: (SESSION_TOOL_SCHEMAS, SESSION_TOOL_FUNCTIONS, SESSION_RISKY_TOOLS),
@@ -169,7 +159,6 @@ _PLANNING = {
     CREATIVE: False,
     CODING: True,
 }
-
 
 def get_mode_config(mode: str) -> dict:
     if mode not in _PROMPTS:
