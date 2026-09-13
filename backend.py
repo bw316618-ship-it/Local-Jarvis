@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import json
 import threading
 import uuid
@@ -13,6 +14,16 @@ from security.devices import DeviceAuth, default_auth_path
 
 ROOT = Path(__file__).resolve().parent
 BACKEND_WS_PORT = CONFIG["backend_ws_port"]
+
+# Thread pool for blocking Jarvis work (LLM inference, tool calls, memory
+# writes). Sized to allow a handful of concurrent device sessions without
+# exhausting system threads; each device serialises its own turns via its
+# per-device runtime_lock, so the pool only needs to cover concurrent
+# *devices*, not concurrent turns from the same device.
+_BACKEND_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=8,
+    thread_name_prefix="jarvis-session",
+)
 
 
 class JarvisBackend:
@@ -640,6 +651,15 @@ class JarvisBackend:
         text,
         websocket,
     ):
+        """Entry point called from the authenticated-message handler.
+
+        Schedules _process_message_async on the event loop and waits for
+        it to complete.  The actual blocking work (LLM inference, tool
+        calls, memory writes) is offloaded to _BACKEND_EXECUTOR inside
+        _process_message_async so the event loop thread is never blocked
+        and can continue servicing WebSocket I/O and pings for all
+        connected clients while a turn is in progress.
+        """
         if not self._loop:
             return
 
@@ -649,10 +669,11 @@ class JarvisBackend:
 
         runtime, runtime_lock = self._get_runtime(device_id)
 
-        # Held for the duration of this device's turn (including the
-        # blocking future.result() below) so a second fast message from
-        # the SAME device queues up rather than racing this one for
-        # runtime.jarvis.confirm_callback / short_term history.
+        # Held for the duration of this device's turn so a second fast
+        # message from the SAME device queues up rather than racing this
+        # one for runtime.jarvis.confirm_callback / short_term history.
+        # The lock is acquired here in the spawned thread, not on the
+        # event loop, so it never blocks the event loop.
         with runtime_lock:
             future = asyncio.run_coroutine_threadsafe(
                 self._process_message_async(
@@ -674,15 +695,34 @@ class JarvisBackend:
         websocket,
         runtime,
     ):
+        """Async wrapper that keeps the event loop free during blocking work.
+
+        runtime.handle_message() calls the LLM (blocking network I/O to
+        Ollama), runs tool calls (blocking subprocess/file/network I/O),
+        and writes to ChromaDB (blocking disk I/O).  Running it directly
+        in a coroutine would block the entire event loop for the duration
+        of the turn, preventing WebSocket sends, pings, and other client
+        connections from being serviced.
+
+        We offload it to _BACKEND_EXECUTOR via loop.run_in_executor() so
+        the event loop stays responsive.  The BackendSurface adapter uses
+        _send_from_thread() (run_coroutine_threadsafe) to schedule sends
+        back onto the event loop from the executor thread, which is safe.
+        """
         adapter = BackendSurface(
             self,
             websocket,
         )
 
+        loop = asyncio.get_event_loop()
+
         try:
-            runtime.handle_message(
-                text,
-                hud=adapter,
+            await loop.run_in_executor(
+                _BACKEND_EXECUTOR,
+                lambda: runtime.handle_message(
+                    text,
+                    hud=adapter,
+                ),
             )
 
         except Exception as exc:

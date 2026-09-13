@@ -116,6 +116,11 @@ def test_simple_question_skips_plan_and_tools(monkeypatch):
 
     assert result == "42"
 
+    # remember_turn() runs on the background _MEMORY_EXECUTOR; since it is a
+    # single-worker pool, waiting on a no-op submitted afterwards guarantees
+    # the prior remember_turn() call has completed before we assert on it.
+    llm_module._MEMORY_EXECUTOR.submit(lambda: None).result()
+
     assert steps == [], "a short single-clause question should skip planning entirely"
     assert remembered == [("what is 6*7", "42")]
     assert jarvis.short_term == [
@@ -239,6 +244,10 @@ def test_memory_is_stored_on_the_round_limit_fallback_path(monkeypatch):
     result = jarvis.chat("loop forever", on_step=lambda m: None)
 
     assert result == "FALLBACK ANSWER"
+
+    # See test_simple_question_skips_plan_and_tools for why this sync point
+    # is needed: remember_turn() runs on a background single-worker executor.
+    llm_module._MEMORY_EXECUTOR.submit(lambda: None).result()
 
     assert remembered == [("loop forever", "FALLBACK ANSWER")]
 

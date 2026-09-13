@@ -13,13 +13,30 @@ HTTP, browser authentication, or device transport.
 
 from brain.llm import JarvisLLM
 from brain.session import JarvisSession, make_confirm_callback
+from brain.session_state import SessionState
 
 
 class JarvisRuntime:
-    """Owns the actual Jarvis assistant independently of any UI."""
+    """Owns the actual Jarvis assistant independently of any UI.
+
+    Each runtime owns exactly one SessionState, which is passed into the
+    JarvisLLM instance so that mode, brain tier, mute, end-request, and
+    creative scope are per-session rather than process-wide globals.
+
+    Surfaces that intentionally share a runtime (e.g. the HUD and the
+    first device in jarvis_backend_daemon.py) share the same SessionState
+    automatically because they share the same JarvisLLM instance.
+    """
 
     def __init__(self, jarvis=None):
-        self.jarvis = jarvis or JarvisLLM()
+        if jarvis is not None:
+            # Caller-supplied instance (e.g. a test double).  Respect it
+            # as-is; do not overwrite its session_state.
+            self.jarvis = jarvis
+            self.session_state = getattr(jarvis, "_session_state", None) or SessionState()
+        else:
+            self.session_state = SessionState()
+            self.jarvis = JarvisLLM(session_state=self.session_state)
         self._surface_lock = None
 
     def handle_message(

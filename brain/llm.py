@@ -8,12 +8,14 @@ from memory.retriever import JarvisMemory
 from memory.audit_log import log_tool_call
 from memory.conversation_memory import recall, remember_turn, recall_facts
 from memory.shared import get_embedder
+from memory.task_store import TaskStore, TaskState, StepState, get_default_store
 
 from tools.tools import TOOL_SCHEMAS
 from tools.session_control import SESSION_TOOL_SCHEMAS
 from tools.creative_generation import get_creative_context
 
-from voice import session_state, document_state
+from voice import session_state as _global_session_state
+from voice import document_state as _global_document_state
 from brain.mode_config import (
     NORMAL,
     COMPANION,
@@ -38,6 +40,30 @@ _TOOL_EXECUTOR = ThreadPoolExecutor(
     max_workers=4,
     thread_name_prefix="tool-call",
 )
+
+# Dedicated single-worker pool for background memory writes (remember_turn).
+# Single worker ensures writes are serialised (no concurrent Chroma upserts
+# from the same process) while keeping them off the response-critical path.
+# Bounded to 1 worker + a small queue: if memory writes fall behind, new
+# submissions are dropped rather than growing the queue unboundedly.
+_MEMORY_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="memory-write",
+)
+
+
+def _remember_turn_async(user_message: str, reply: str) -> None:
+    """Schedule a remember_turn() call in the background memory executor.
+
+    The response is returned to the caller immediately; the embedding +
+    ChromaDB write happens in a background thread.  Failures are swallowed
+    inside remember_turn() itself (see conversation_memory.py).
+    """
+    try:
+        _MEMORY_EXECUTOR.submit(remember_turn, user_message, reply)
+    except RuntimeError:
+        # Executor shut down (e.g. during process teardown) -- ignore.
+        pass
 
 _CHAT_OPTIONS = get_chat_options()
 
@@ -197,14 +223,28 @@ class JarvisLLM:
     # which skip __init__ entirely -- without this, chat()'s per-mode model
     # resolution below would AttributeError on any such instance.
     _explicit_model_override = None
+    # Default session_state for test doubles that skip __init__.
+    _session_state = None
 
-    def __init__(self, model=None, confirm_callback=None):
+    def __init__(self, model=None, confirm_callback=None, session_state=None, task_store=None):
         self.client = Client(host="http://localhost:11434")
         self._explicit_model_override = model
         self.model = model or CONFIG["model"]
         self.memory = JarvisMemory()
         self.confirm_callback = confirm_callback or _default_confirm
         self.short_term = []
+        # Per-session state: mode, brain tier, mute, end-request, creative
+        # scope.  When None, falls back to the process-wide globals in
+        # voice/session_state.py and voice/document_state.py so that
+        # existing callers (CLI, voice, HUD) continue to work unchanged.
+        self._session_state = session_state
+        # Durable task/step store.  When None, uses the process-wide
+        # default store (get_default_store()).  Tests can inject an
+        # isolated TaskStore(path=tmp_path/...) instance.
+        self._task_store = task_store
+        # The task_id for the currently-executing chat() turn.  Set at
+        # the start of chat() and cleared when the turn completes.
+        self._current_task_id = None
 
         self.system_prompt = (
             "You are J.A.R.V.I.S., a highly capable local-first AI assistant. "
@@ -255,8 +295,27 @@ class JarvisLLM:
 
         self.companion_system_prompt = get_mode_config(COMPANION)["prompt"]
 
+    @property
+    def _store(self) -> TaskStore:
+        """Return the task store for this instance."""
+        if self._task_store is not None:
+            return self._task_store
+        return get_default_store()
+
     def _active_mode(self) -> str:
-        return session_state.current_mode()
+        if self._session_state is not None:
+            return self._session_state.current_mode()
+        return _global_session_state.current_mode()
+
+    def _is_heavy_brain(self) -> bool:
+        if self._session_state is not None:
+            return self._session_state.is_heavy_brain()
+        return _global_session_state.is_heavy_brain()
+
+    def _get_active_document(self):
+        if self._session_state is not None:
+            return self._session_state.get_active_document()
+        return _global_document_state.get_active_document()
 
     def _active_config(self) -> dict:
         return get_mode_config(self._active_mode())
@@ -305,7 +364,25 @@ class JarvisLLM:
                 )
                 return result
 
+        # ------------------------------------------------------------------
+        # Durable step record: create before execution so a process crash
+        # mid-call leaves a RUNNING step that recover_interrupted() can
+        # mark UNKNOWN on restart.
+        # ------------------------------------------------------------------
+        step_id = None
+        try:
+            step_id = self._store.create_step(
+                task_id=self._current_task_id or "untracked",
+                tool_name=name,
+                arguments=arguments,
+            )
+            self._store.start_step(step_id)
+        except Exception:
+            # Store failures must never prevent tool execution.
+            step_id = None
+
         start = time.monotonic()
+        timed_out = False
 
         try:
             future = _TOOL_EXECUTOR.submit(func, **arguments)
@@ -314,14 +391,33 @@ class JarvisLLM:
                     future.result(timeout=TOOL_CALL_TIMEOUT_SECONDS)
                 )
             except FutureTimeoutError:
+                timed_out = True
                 result = (
                     f"Error: tool '{name}' timed out after "
                     f"{TOOL_CALL_TIMEOUT_SECONDS}s"
                 )
+                # NOTE: the future is NOT cancelled here -- the underlying
+                # thread may still be running.  We record TIMEOUT (not
+                # FAILED) so callers know the outcome is unknown and must
+                # not blindly retry non-idempotent operations.
         except Exception as e:
             result = f"Error running tool '{name}': {e}"
 
         duration_ms = int((time.monotonic() - start) * 1000)
+
+        # ------------------------------------------------------------------
+        # Update the durable step record with the outcome.
+        # ------------------------------------------------------------------
+        if step_id is not None:
+            try:
+                if timed_out:
+                    self._store.timeout_step(step_id, duration_ms=duration_ms)
+                elif result.startswith("Error"):
+                    self._store.fail_step(step_id, result=result, duration_ms=duration_ms)
+                else:
+                    self._store.complete_step(step_id, result=result, duration_ms=duration_ms)
+            except Exception:
+                pass  # store failures must not affect the tool result
 
         log_tool_call(
             name,
@@ -432,7 +528,7 @@ class JarvisLLM:
         )
 
         self._update_short_term(user_message, result)
-        remember_turn(user_message, result)
+        _remember_turn_async(user_message, result)
         return result
 
     def chat(
@@ -442,6 +538,7 @@ class JarvisLLM:
         on_sentence=None,
         on_token=None,
         map_context: str = None,
+        session_id: str = "",
     ) -> str:
         emit = on_step or _default_on_step
         mode = self._active_mode()
@@ -458,7 +555,7 @@ class JarvisLLM:
 
         if instant is not None:
             self._update_short_term(user_message, instant)
-            remember_turn(user_message, instant)
+            _remember_turn_async(user_message, instant)
 
             if on_token:
                 on_token(instant)
@@ -467,6 +564,22 @@ class JarvisLLM:
                 on_sentence(instant)
 
             return instant
+
+        # ---------------------------------------------------------------
+        # Create a durable task record for this turn.
+        # ---------------------------------------------------------------
+        task_id = None
+        try:
+            task_id = self._store.create_task(
+                user_message=user_message,
+                session_id=session_id or "",
+            )
+            self._store.start_task(task_id)
+            self._current_task_id = task_id
+        except Exception:
+            # Store failures must never prevent a response.
+            task_id = None
+            self._current_task_id = None
 
         route = classify(user_message)
 
@@ -481,7 +594,7 @@ class JarvisLLM:
         # reassigning it here is all that's needed; neither method's
         # signature has to change.
         self.model = get_model_for_mode(
-            mode, explicit=self._explicit_model_override, heavy=session_state.is_heavy_brain()
+            mode, explicit=self._explicit_model_override, heavy=self._is_heavy_brain()
         )
 
         if mode == CREATIVE:
@@ -527,6 +640,14 @@ class JarvisLLM:
             }
 
             if skip_retrieval:
+                # True bypass: no embedding, no vector lookups at all.
+                # The past_context/facts_context assignments below are
+                # inside this branch so they are NOT overwritten by the
+                # recall()/recall_facts() calls that follow in the else
+                # branch.  Previously those calls were outside the
+                # if/else entirely, so skip_retrieval only skipped the
+                # document-context lookup while still paying for two
+                # embedding + Chroma round-trips per turn.
                 query_embedding = None
                 context = "No memory retrieval required for this request."
                 past_context = "No historical conversation retrieval required."
@@ -569,25 +690,25 @@ class JarvisLLM:
                         else "No relevant information was found in local memory."
                     )
 
-            past_turns = recall(
-                user_message,
-                query_embedding=query_embedding,
-            )
-            past_context = (
-                "\n\n".join(past_turns)
-                if past_turns
-                else "No relevant past conversation found."
-            )
+                past_turns = recall(
+                    user_message,
+                    query_embedding=query_embedding,
+                )
+                past_context = (
+                    "\n\n".join(past_turns)
+                    if past_turns
+                    else "No relevant past conversation found."
+                )
 
-            known_facts = recall_facts(
-                user_message,
-                query_embedding=query_embedding,
-            )
-            facts_context = (
-                "\n".join(known_facts)
-                if known_facts
-                else "No relevant remembered facts found."
-            )
+                known_facts = recall_facts(
+                    user_message,
+                    query_embedding=query_embedding,
+                )
+                facts_context = (
+                    "\n".join(known_facts)
+                    if known_facts
+                    else "No relevant remembered facts found."
+                )
 
         active_prompt = (
             self.companion_system_prompt
@@ -646,7 +767,7 @@ class JarvisLLM:
                 }
             )
         elif mode == CREATIVE:
-            active_document = document_state.get_active_document()
+            active_document = self._get_active_document()
             messages.append(
                 {
                     "role": "user",
@@ -705,46 +826,67 @@ class JarvisLLM:
 
         reply = None
 
-        for _ in range(MAX_TOOL_ROUNDS):
-            content, tool_calls = self._stream_round(
-                messages,
-                active_tools,
-                on_token=on_token,
-                on_sentence=on_sentence,
-            )
-
-            if not tool_calls:
-                reply = content
-                break
-
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": content,
-                    "tool_calls": tool_calls,
-                }
-            )
-
-            for tool_call in tool_calls:
-                name = tool_call["function"]["name"]
-                args = tool_call["function"].get("arguments") or {}
-
-                emit(f"Step: {name}({args})")
-                result = self._run_tool_call(tool_call)
-
-                messages.append(
-                    {"role": "tool", "content": result}
+        try:
+            for _ in range(MAX_TOOL_ROUNDS):
+                content, tool_calls = self._stream_round(
+                    messages,
+                    active_tools,
+                    on_token=on_token,
+                    on_sentence=on_sentence,
                 )
 
-        if reply is None:
-            final_content, _ = self._stream_round(
-                messages,
-                None,
-                on_token=on_token,
-                on_sentence=on_sentence,
-            )
-            reply = final_content
+                if not tool_calls:
+                    reply = content
+                    break
 
-        remember_turn(user_message, reply)
-        self._update_short_term(user_message, reply)
-        return reply
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": content,
+                        "tool_calls": tool_calls,
+                    }
+                )
+
+                for tool_call in tool_calls:
+                    name = tool_call["function"]["name"]
+                    args = tool_call["function"].get("arguments") or {}
+
+                    emit(f"Step: {name}({args})")
+                    result = self._run_tool_call(tool_call)
+
+                    messages.append(
+                        {"role": "tool", "content": result}
+                    )
+
+            if reply is None:
+                final_content, _ = self._stream_round(
+                    messages,
+                    None,
+                    on_token=on_token,
+                    on_sentence=on_sentence,
+                )
+                reply = final_content
+
+            _remember_turn_async(user_message, reply)
+            self._update_short_term(user_message, reply)
+
+            # Complete the durable task record.
+            if task_id is not None:
+                try:
+                    self._store.complete_task(task_id, final_reply=reply or "")
+                except Exception:
+                    pass
+
+            return reply
+
+        except Exception as exc:
+            # Mark the task FAILED so the store reflects the real outcome.
+            if task_id is not None:
+                try:
+                    self._store.fail_task(task_id, reason=str(exc))
+                except Exception:
+                    pass
+            raise
+
+        finally:
+            self._current_task_id = None
