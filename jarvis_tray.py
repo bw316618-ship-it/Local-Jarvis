@@ -9,7 +9,9 @@ from PIL import Image, ImageDraw
 
 from brain.runtime import JarvisRuntime
 from config import CONFIG
+from tools.desktop_pet import set_pet as _set_desktop_pet
 from tools.diagnostics import system_status_snapshot
+from ui.desktop_pet import DesktopPet
 from ui.hud_server import hud
 from ui.native_overlay import NativeOverlay
 from voice import session_state
@@ -23,6 +25,7 @@ HUD_URL = (
 
 _window = None
 _overlay = None
+_pet = None
 _quitting = False
 
 _AUTOSTART_NAME = "JarvisTray.vbs"
@@ -199,6 +202,23 @@ def _overlay_visible(item=None):
     )
 
 
+def _toggle_pet(icon, item):
+    if _pet is None:
+        return
+
+    if _pet.is_out():
+        _pet.call_home()
+    else:
+        _pet.release()
+
+
+def _pet_out(item=None):
+    return (
+        _pet is not None
+        and _pet.is_out()
+    )
+
+
 def _on_window_closing():
     if _quitting:
         return True
@@ -272,6 +292,9 @@ def _quit(icon, item):
     if _overlay is not None:
         _overlay.stop()
 
+    if _pet is not None:
+        _pet.stop()
+
     if _window is not None:
         try:
             _window.destroy()
@@ -290,6 +313,11 @@ def _build_menu():
             "Show Overlay",
             _toggle_overlay,
             checked=_overlay_visible,
+        ),
+        pystray.MenuItem(
+            "Let Pet Out",
+            _toggle_pet,
+            checked=_pet_out,
         ),
         pystray.MenuItem(
             "Mute",
@@ -328,6 +356,7 @@ def _run_tray():
 def main():
     global _window
     global _overlay
+    global _pet
 
     print(
         "Starting Jarvis tray app..."
@@ -376,6 +405,14 @@ def main():
     )
 
     _overlay.start()
+
+    _pet = DesktopPet(
+        assets_dir=Path(__file__).parent / "assets" / "desktop_pet",
+    )
+
+    _pet.start()
+
+    _set_desktop_pet(_pet)
 
     threading.Thread(
         target=_run_tray,
