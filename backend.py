@@ -929,6 +929,28 @@ class BackendSurface:
         # routing is implemented separately.
         return False
 
+    def broadcast_map_actions(
+        self,
+        actions,
+    ):
+        # This device may not render a map at all, but it must still
+        # implement this method: brain/session.py's JarvisSession always
+        # drains tools/map_hud.py's shared action queue for every turn
+        # and forwards to self.hud.broadcast_map_actions() if present.
+        # Without this method, a map-producing tool call from *this*
+        # device's own turn would be drained correctly (no leak) but
+        # silently dropped here -- which is fine functionally, but
+        # forwarding it is free and keeps the door open for a future
+        # device-side map UI.
+        for action in actions:
+            self.backend._send_from_thread(
+                self.websocket,
+                {
+                    "type": "map_action",
+                    **action,
+                },
+            )
+
     @staticmethod
     def _tool_name(message):
         body = (

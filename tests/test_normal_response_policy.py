@@ -78,3 +78,17 @@ def test_normal_system_prompt_forbids_meta_responses():
     # matching the current phrasing rather than the old literal string.
     assert "A greeting deserves a natural greeting" in prompt
     assert "Do not invoke tools merely because they are available" in prompt
+
+
+def test_normal_system_prompt_separates_tool_sourced_facts_from_model_knowledge():
+    """Hallucination-reduction: the model must ground answers in an
+    actual tool result when one exists for this turn, and flag when
+    it's instead answering from its own (possibly outdated/wrong)
+    training knowledge rather than presenting a guess as fact."""
+    jarvis = make_jarvis()
+
+    prompt = jarvis.system_prompt
+
+    assert "authoritative source for this turn" in prompt
+    assert "answering from general knowledge" in prompt
+    assert "Prefer calling a tool over guessing" in prompt

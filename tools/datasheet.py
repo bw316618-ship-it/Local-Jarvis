@@ -10,7 +10,17 @@ tools/pdf_viewer.py's open_pdf to actually view a result.
 
 Uses the same ddgs backend as web_search rather than any distributor-
 specific API, so no API keys are required.
+
+Retries transient failures the same way tools/web.py's web_search does
+and for the same reason: ddgs wraps its own HTTP client rather than
+exposing a plain requests.Response, so tools/net.py's request_with_retry
+(built around requests) doesn't apply cleanly here. This tool used to
+have no retry at all -- a single dropped connection failed the whole
+search immediately, unlike every other network-touching tool -- which
+is the gap this closes.
 """
+
+import time
 
 
 def find_datasheet(part_or_product: str) -> str:
@@ -28,11 +38,27 @@ def find_datasheet(part_or_product: str) -> str:
         )
 
     search_query = f"{query} datasheet filetype:pdf"
-    try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(search_query, max_results=8))
-    except Exception as e:
-        return f"Datasheet search failed: {e}"
+
+    from config import CONFIG
+
+    attempts = max(1, CONFIG.get("network_retry_attempts", 3))
+    backoff_seconds = CONFIG.get("network_retry_backoff_seconds", 0.5)
+
+    last_exc = None
+    results = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(search_query, max_results=8))
+            last_exc = None
+            break
+        except Exception as e:
+            last_exc = e
+            if attempt < attempts:
+                time.sleep(backoff_seconds * attempt)
+
+    if last_exc is not None:
+        return f"Datasheet search failed: {last_exc}"
 
     if not results:
         return f"No datasheet results found for '{query}'."

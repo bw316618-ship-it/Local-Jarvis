@@ -18,7 +18,12 @@ DEFAULTS = {
     # Fast local model.
     "model": "qwen3:4b",
     "mode_models": {},
-    "num_ctx": 4096,
+    # 4096 silently truncated instructions/context on longer turns --
+    # the highest-impact lever identified before any prompt tuning.
+    # 8192 roughly doubles headroom for tool results + recalled memory
+    # + the system prompt to all fit without the oldest, often most
+    # relevant, content getting pushed out first.
+    "num_ctx": 8192,
     "max_tool_rounds": 8,
     "short_term_turns": 4,
 
@@ -41,6 +46,20 @@ DEFAULTS = {
     "tool_relevance_threshold": 20,
     "tool_relevance_top_k": 12,
 
+    # Memory retrieval. recall()/recall_facts() used to return their
+    # top-k nearest neighbors unconditionally -- once the store held
+    # more than a handful of turns/facts, "top-3 closest" could still
+    # mean "3 barely-related results" once nothing genuinely relevant
+    # existed, and that noise got stuffed into the prompt as if it were
+    # signal. This is a cosine-similarity floor (0.0-1.0, higher =
+    # stricter) applied after the nearest-neighbor query: a candidate
+    # below it is dropped rather than returned just because it was the
+    # closest thing available. 0.35 is a conservative starting point
+    # for all-MiniLM-L6-v2 (memory/shared.py) -- raise it if recall
+    # still feels noisy, lower it if genuinely relevant memories are
+    # being dropped.
+    "memory_relevance_threshold": 0.35,
+
     # Streaming.
     "streaming": True,
 
@@ -57,11 +76,20 @@ DEFAULTS = {
     # matched to the 6GB-VRAM Nitro V15 constraint); "heavy_model" is an
     # optional larger model the user can opt into per-session via the
     # /brain heavy command or enter_heavy_brain tool (see
-    # voice/session_state.py, tools/session_control.py). Unset by
-    # default -- same "quietly falls back to the default" pattern as
-    # ors_api_key -- since which model actually fits depends on what's
-    # pulled in Ollama and how much is offloaded to system RAM.
-    "heavy_model": None,
+    # voice/session_state.py, tools/session_control.py). Defaults to
+    # qwen3:8b rather than the None it used to be -- with no default,
+    # the heavy-brain toggle silently did nothing (get_model_for_mode
+    # falls back to the fast tier whenever heavy_model is unset), so
+    # every /brain heavy or enter_heavy_brain call was a no-op until the
+    # user hand-edited jarvis_config.json. qwen3:8b, not qwen2.5:14b, is
+    # the default specifically because of the 6GB-VRAM constraint above
+    # -- 14b would likely spill out of VRAM and make "heavy" slower than
+    # it's worth. Unlike ors_api_key, there's no runtime fallback if
+    # qwen3:8b isn't actually pulled in Ollama -- Ollama itself will
+    # error on first use; `ollama pull qwen3:8b` before relying on
+    # /brain heavy, or override this key if a different model is
+    # preferred.
+    "heavy_model": "qwen3:8b",
 
     # Network tool retry (web search, weather, routing, nearby-place,
     # geocoding/IP-location lookups). Only retryable failures are retried

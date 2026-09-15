@@ -31,7 +31,7 @@ from pathlib import Path
 from config import CONFIG
 from tools.diagnostics import system_status_snapshot
 from tools.location import reverse_geocode_place
-from tools.map_hud import drain_map_actions
+from tools.map_hud import drain_map_actions, MAP_ACTIONS_LOCK
 from tools.nearby import find_nearby_place
 
 STATIC_DIR = Path(__file__).resolve().parent / "hud" / "static"
@@ -1211,19 +1211,17 @@ class HUDBridge:
                     map_context_text = None
 
             try:
+                # brain/session.py's JarvisSession.handle_message() (which
+                # this eventually calls into) now holds MAP_ACTIONS_LOCK
+                # and drains+broadcasts any map actions from this turn
+                # itself -- for every surface, not just this one. See its
+                # docstring, and tools/map_hud.py's MAP_ACTIONS_LOCK
+                # docstring, for why every producer must also drain.
                 self._runtime.handle_message(
                     text,
                     hud=self,
                     map_context=map_context_text,
                 )
-
-                for action in drain_map_actions():
-                    self._broadcast(
-                        {
-                            "type": "map_action",
-                            **action,
-                        }
-                    )
 
             except Exception as e:
                 self._broadcast(
@@ -1250,13 +1248,21 @@ class HUDBridge:
         center=None,
     ):
         try:
-            summary = find_nearby_place(
-                query,
-                radius_km,
-                center=center,
-            )
+            # Same reasoning as the chat-turn path above: hold
+            # MAP_ACTIONS_LOCK across find_nearby_place()'s enqueue and
+            # this drain so a concurrent search or chat-turn map-tool
+            # call can't steal or interleave with this search's own
+            # markers.
+            with MAP_ACTIONS_LOCK:
+                summary = find_nearby_place(
+                    query,
+                    radius_km,
+                    center=center,
+                )
 
-            for action in drain_map_actions():
+                actions = drain_map_actions()
+
+            for action in actions:
                 self._broadcast(
                     {
                         "type": "map_action",
@@ -1380,6 +1386,27 @@ class HUDBridge:
                     sentence,
             }
         )
+
+    def broadcast_map_actions(
+        self,
+        actions,
+    ):
+        """Forward drained tools/map_hud.py actions to connected browsers.
+
+        Called by brain/session.py's JarvisSession once per
+        handle_message() turn -- this is the only remaining place that
+        turns a drained action into a browser-bound "map_action"
+        message; _handle_user_message used to do this drain-and-
+        broadcast itself, but that duplicated (and could race) what
+        JarvisSession now does for every surface, not just this one.
+        """
+        for action in actions:
+            self._broadcast(
+                {
+                    "type": "map_action",
+                    **action,
+                }
+            )
 
     # -- Confirmation ---------------------------------------------------
 

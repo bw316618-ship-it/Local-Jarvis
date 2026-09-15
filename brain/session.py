@@ -10,6 +10,7 @@ extra_sinks=.
 """
 
 from memory.transcript import append_turn
+from tools.map_hud import MAP_ACTIONS_LOCK, drain_map_actions
 
 
 def make_confirm_callback(console=None, hud=None):
@@ -274,6 +275,21 @@ class JarvisSession:
 
         return body.split("(")[0].strip()
 
+    def _broadcast_map_actions(self, actions) -> None:
+        """Forward this turn's drained map actions to the HUD, if any.
+
+        A console-only session (no hud=) or a hud object that predates
+        this method (a test double, say) has nothing to forward to --
+        drain_map_actions() above still emptied the shared queue either
+        way, which is the part that actually matters.
+        """
+        if not actions or self.hud is None:
+            return
+
+        broadcast = getattr(self.hud, "broadcast_map_actions", None)
+        if broadcast is not None:
+            broadcast(actions)
+
     def handle_message(
         self,
         text: str,
@@ -332,12 +348,35 @@ class JarvisSession:
                 )
 
         try:
-            reply = self.jarvis.chat(
-                text,
-                on_step=on_step,
-                on_sentence=on_sentence,
-                map_context=map_context,
-            )
+            # tools/map_hud.py's _MAP_ACTIONS queue is process-wide and
+            # shared by every surface (CLI, HUD chat, HUD search box,
+            # any connected device) -- a tool call in this turn (e.g.
+            # find_nearby_place, clear_map_markers) may enqueue actions
+            # onto it. Every producer must also drain what it produced,
+            # or the leftover sits in the queue for some unrelated later
+            # drain (the HUD's search box, or another device's turn) to
+            # scoop up and misattribute -- this is the root cause behind
+            # "map search only works once / results don't clear": only
+            # ui/hud_server.py's own two handlers used to drain at all,
+            # so a map-producing tool call from the CLI or from a
+            # non-HUD device turn would leak into the queue forever,
+            # waiting to contaminate the next HUD interaction. Holding
+            # MAP_ACTIONS_LOCK for the whole produce-then-drain span
+            # here (matching tools/map_hud.py's own docstring) means
+            # *every* handle_message() call -- regardless of surface --
+            # now cleans up after itself.
+            with MAP_ACTIONS_LOCK:
+                try:
+                    reply = self.jarvis.chat(
+                        text,
+                        on_step=on_step,
+                        on_sentence=on_sentence,
+                        map_context=map_context,
+                    )
+                finally:
+                    map_actions = drain_map_actions()
+
+            self._broadcast_map_actions(map_actions)
 
             _first_output_once()
 

@@ -20,8 +20,29 @@ doesn't cover: clearing pins and focusing the view.
 
 import json
 import queue
+import threading
 
 _MAP_ACTIONS = queue.Queue()
+
+# _MAP_ACTIONS is process-wide: every device's chat turn (via
+# find_nearby_place, called as an LLM tool) and the HUD's own map search
+# box / reverse-geocode-on-click feature (ui/hud_server.py's
+# _handle_map_search) all enqueue onto and drain from this one queue.
+# Without external synchronization, two producers racing (e.g. two
+# search-box requests fired close together, or a search-box request
+# overlapping a chat turn that happens to call find_nearby_place) can
+# interleave: producer A enqueues, producer B enqueues and drains before
+# A does, stealing A's action and leaving A's own drain call empty --
+# so A's caller broadcasts a status-text result with no matching markers
+# ever delivered. Worse, if a drain call runs at a moment where the
+# queue happens to contain a stray leftover from an earlier race, that
+# stale action gets broadcast attached to a completely unrelated later
+# interaction. This showed up as "search only works once" / "results
+# don't clear". MAP_ACTIONS_LOCK must be held by every caller for the
+# full span from enqueue (i.e. the tool call that may enqueue actions)
+# through its own drain_map_actions() call, so no other producer's
+# actions can ever land inside another caller's drain.
+MAP_ACTIONS_LOCK = threading.Lock()
 
 
 def _queue_action(action, **payload):
@@ -31,7 +52,13 @@ def _queue_action(action, **payload):
 
 
 def drain_map_actions():
-    """Return all pending browser-map actions."""
+    """Return all pending browser-map actions.
+
+    Callers that both produce actions (by calling a tool that may queue
+    one, e.g. find_nearby_place) and then drain them to broadcast should
+    hold MAP_ACTIONS_LOCK for the whole produce-then-drain span -- see
+    the module docstring above for why.
+    """
     actions = []
     while True:
         try:
