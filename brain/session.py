@@ -22,7 +22,26 @@ def make_confirm_callback(console=None, hud=None):
 
     def confirm(name: str, arguments: dict) -> bool:
         if hud is not None:
-            return hud.request_confirmation(name, arguments)
+            # A distinct visual state for "Jarvis is waiting on you to
+            # approve something risky" -- previously this looked
+            # identical to ordinary "thinking", so the HUD gave no
+            # visual signal that anything different was happening.
+            # set_state is best-effort: a test double or an older hud
+            # adapter without it must not break the confirmation flow
+            # itself, which is the part that actually gates the tool.
+            set_state = getattr(hud, "set_state", None)
+            if set_state is not None:
+                set_state("confirming", {"name": name})
+
+            try:
+                return hud.request_confirmation(name, arguments)
+            finally:
+                # The turn is still mid-flight either way (tool
+                # execution or the final reply follows) -- "thinking"
+                # is what handle_message already shows for the rest of
+                # the turn, so resume there rather than back to idle.
+                if set_state is not None:
+                    set_state("thinking")
 
         if console is not None:
             from rich.panel import Panel

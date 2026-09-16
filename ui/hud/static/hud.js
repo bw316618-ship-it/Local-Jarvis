@@ -16,16 +16,19 @@ const STATE_LABELS = {
   thinking: "THINKING",
   speaking: "SPEAKING",
   tool: "WORKING",
+  confirming: "AWAITING CONFIRMATION",
   error: "ERROR",
 };
 
 const MODE_STORAGE_KEY = "jarvis-hud-mode";
+const AUDIO_CUES_STORAGE_KEY = "jarvis-hud-audio-cues";
 
 const wrap = document.getElementById("wrap");
 const dial = document.getElementById("dial");
 const statusDot = document.getElementById("dot");
 const statusText = document.getElementById("statustext");
 const modeToggle = document.getElementById("modeToggle");
+const audioCuesToggle = document.getElementById("audioCuesToggle");
 
 const chatLog = document.getElementById("chatLog");
 const chatForm = document.getElementById("chatForm");
@@ -499,13 +502,139 @@ modeToggle.addEventListener(
 );
 
 // ------------------------------------------------------------
+// Audio cues
+// ------------------------------------------------------------
+//
+// Short, procedural tones (Web Audio oscillators -- no audio asset
+// files needed) for a few state transitions, so the HUD isn't purely
+// visual+TTS with nothing marking the moments in between. Deliberately
+// sparse: only the transitions that mark something starting (listening,
+// thinking, confirming, error) get a cue -- speaking doesn't, since
+// that's what the TTS reply itself already announces, and a cue on top
+// would just be noise stacked on speech. Gated by AUDIO_CUES_STORAGE_KEY
+// (default on) via the #audioCuesToggle button below.
+
+let audioCtx = null;
+let audioCuesEnabled =
+  localStorage.getItem(AUDIO_CUES_STORAGE_KEY) !== "off";
+
+function getAudioCtx() {
+  // Created lazily, not at page load -- most browsers block audio
+  // output before any user gesture has happened on the page, and the
+  // first setState() call (e.g. on connect) can otherwise fire before
+  // the user has clicked anything.
+  if (audioCtx) return audioCtx;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch (e) {
+    return null;
+  }
+  return audioCtx;
+}
+
+function playTone(freq, durationMs, opts) {
+  if (!audioCuesEnabled) return;
+
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+
+  try {
+    const options = opts || {};
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = options.type || "sine";
+    osc.frequency.value = freq;
+
+    const now = ctx.currentTime;
+    const volume = options.volume || 0.05;
+
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(volume, now + 0.01);
+    gain.gain.linearRampToValueAtTime(0, now + durationMs / 1000);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + durationMs / 1000 + 0.02);
+  } catch (e) {
+    // Audio is a nicety -- never let it break a state transition.
+  }
+}
+
+function playStateCue(stateName) {
+  switch (stateName) {
+    case "listening":
+      playTone(880, 90);
+      setTimeout(() => playTone(1175, 90), 90);
+      break;
+
+    case "thinking":
+      playTone(220, 70, { type: "triangle", volume: 0.04 });
+      break;
+
+    case "confirming":
+      playTone(660, 110, { type: "square", volume: 0.045 });
+      setTimeout(() => playTone(440, 140, { type: "square", volume: 0.045 }), 130);
+      break;
+
+    case "error":
+      playTone(300, 220, { type: "sawtooth", volume: 0.045 });
+      break;
+
+    // idle, speaking, tool: deliberately silent -- see the note above.
+  }
+}
+
+function setAudioCuesEnabled(enabled) {
+  audioCuesEnabled = enabled;
+  localStorage.setItem(AUDIO_CUES_STORAGE_KEY, enabled ? "on" : "off");
+  audioCuesToggle.textContent = `SOUND: ${enabled ? "ON" : "OFF"}`;
+}
+
+setAudioCuesEnabled(audioCuesEnabled);
+
+audioCuesToggle.addEventListener("click", () => {
+  setAudioCuesEnabled(!audioCuesEnabled);
+});
+
+// ------------------------------------------------------------
 // State
 // ------------------------------------------------------------
+
+// Idle ambient presence: rather than sitting at the same idle
+// brightness forever, the reactor settles into a dimmer "resting"
+// look after RESTING_IDLE_MS with no state change at all -- see the
+// #wrap[data-resting="true"] rules in hud.css. lastStateChangeAt is
+// updated on every setState() call (even a redundant idle->idle one),
+// and the interval below is the only thing that ever sets
+// data-resting -- setState() always clears it immediately on any
+// actual transition, well before the threshold could apply.
+const RESTING_IDLE_MS = 90000;
+let lastStateChangeAt = Date.now();
+
+setInterval(() => {
+  const isIdle = wrap.dataset.state === "idle";
+  const longEnough =
+    Date.now() - lastStateChangeAt > RESTING_IDLE_MS;
+
+  if (isIdle && longEnough) {
+    wrap.dataset.resting = "true";
+  } else {
+    delete wrap.dataset.resting;
+  }
+}, 5000);
 
 function setState(
   stateName,
   meta
 ) {
+  lastStateChangeAt = Date.now();
+  delete wrap.dataset.resting;
+
+  const previousState = wrap.dataset.state;
+
   const label =
     STATE_LABELS[stateName] ||
     STATE_LABELS.idle;
@@ -514,6 +643,10 @@ function setState(
     STATE_LABELS[stateName]
       ? stateName
       : "idle";
+
+  if (wrap.dataset.state !== previousState) {
+    playStateCue(wrap.dataset.state);
+  }
 
   statusText.textContent =
     meta && meta.name
@@ -878,6 +1011,19 @@ function connect() {
         // non-invasive observer that reads shared state rather than
         // hooking into this socket handler itself.
         window.JarvisSystemStatus = data;
+        break;
+
+      case "proactive_note":
+        // Unprompted, pushed periodically by
+        // ui/hud_server.py's _proactive_insights_loop -- the same
+        // get_suggestions() check /insights runs on demand, just
+        // surfaced without being asked. Rendered with its own "proactive"
+        // class (see hud.css) so it reads visually as Jarvis noticing
+        // something, not as a reply to something you said.
+        appendChatLine(
+          data.text,
+          "proactive"
+        );
         break;
 
       case "error":

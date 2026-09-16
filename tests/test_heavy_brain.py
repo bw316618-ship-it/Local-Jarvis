@@ -67,5 +67,6 @@ def test_tool_functions_flip_the_same_flag_the_model_can_call():
 
 
 def test_tool_functions_return_a_confirmation_string():
-    assert "heavy" in enter_heavy_brain().lower()
-    assert "fast" in exit_heavy_brain().lower() or "default" in exit_heavy_brain().lower()
+    from brain.persona_lines import POOLS
+    assert enter_heavy_brain() in POOLS["enter_heavy_brain"]
+    assert exit_heavy_brain() in POOLS["exit_heavy_brain"]

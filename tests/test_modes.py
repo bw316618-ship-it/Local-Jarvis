@@ -139,7 +139,8 @@ def test_companion_tool_is_resolved_from_session_registry(monkeypatch):
     jarvis = make_jarvis()
     session_state.set_mode(COMPANION)
     result = jarvis._run_tool_call({"function": {"name": "exit_companion_mode", "arguments": {}}})
-    assert "Back to normal" in result
+    from brain.persona_lines import POOLS
+    assert result in POOLS["exit_companion"]
     assert session_state.current_mode() == NORMAL
 
 

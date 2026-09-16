@@ -29,6 +29,7 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 
 from config import CONFIG
+from memory.insights import get_suggestions
 from tools.diagnostics import system_status_snapshot
 from tools.location import reverse_geocode_place
 from tools.map_hud import drain_map_actions, MAP_ACTIONS_LOCK
@@ -44,6 +45,7 @@ CONFIRM_TIMEOUT_SECONDS = 120
 AUTH_TIMEOUT_SECONDS = 15
 PAIRING_TIMEOUT_SECONDS = 120
 SYSTEM_STATUS_INTERVAL_SECONDS = CONFIG.get("hud_system_status_interval_seconds", 5)
+PROACTIVE_INSIGHTS_INTERVAL_SECONDS = CONFIG.get("proactive_insights_interval_seconds", 1200)
 
 
 def _hash_token(token: str) -> str:
@@ -136,6 +138,12 @@ class HUDBridge:
 
         self._pending_confirms = {}
         self._pending_confirms_lock = threading.Lock()
+
+        # Proactive insights: memory/insights.py's get_suggestions(),
+        # re-checked periodically while a browser is connected (see
+        # _proactive_insights_loop below) rather than only ever on
+        # demand via /insights.
+        self._last_proactive_suggestions = []
 
     # -- Trust database --------------------------------------------------
 
@@ -430,6 +438,67 @@ class HUDBridge:
         with self._device_lock:
             return list(
                 self._devices.keys()
+            )
+
+    # -- Proactive insights ----------------------------------------------
+
+    async def _proactive_insights_loop(self):
+        """Re-check get_suggestions() every
+        PROACTIVE_INSIGHTS_INTERVAL_SECONDS and broadcast anything new.
+
+        Mirrors _system_status_loop's shape above: get_suggestions()
+        does file I/O (the audit log) and, per its own docstring, may
+        run embedding-based clustering -- both are blocking work, so
+        this runs via asyncio.to_thread rather than directly on the
+        event loop, same reasoning as psutil.cpu_percent's blocking
+        sampling window above. Waits on _ws_stop_signal with a timeout
+        instead of a flat asyncio.sleep so shutdown isn't delayed by up
+        to a full interval.
+        """
+        while not self._ws_stop_signal.is_set():
+            try:
+                await self._check_and_broadcast_insights()
+            except Exception as e:
+                print(f"[Jarvis HUD] Proactive insights check failed: {e}")
+
+            try:
+                await asyncio.wait_for(
+                    self._ws_stop_signal.wait(),
+                    timeout=PROACTIVE_INSIGHTS_INTERVAL_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                pass  # normal -- just means it's time for the next check
+
+    async def _check_and_broadcast_insights(self):
+        """Run get_suggestions() once and broadcast anything new.
+
+        "New" means not present in the previous check's results --
+        get_suggestions() re-derives its findings from the audit log
+        each call rather than tracking what's already been shown, so
+        that comparison happens here. Does nothing if nobody's
+        connected to see it.
+        """
+        suggestions = await asyncio.to_thread(
+            get_suggestions, include_folder_check=True
+        )
+
+        new_ones = [
+            s for s in suggestions if s not in self._last_proactive_suggestions
+        ]
+        self._last_proactive_suggestions = suggestions
+
+        if not new_ones:
+            return
+
+        # _broadcast_json already no-ops when self._devices is empty
+        # (see its own early return) -- no separate "anyone listening"
+        # check needed here, same as _system_status_loop above.
+        for note in new_ones:
+            await self._broadcast_json(
+                {
+                    "type": "proactive_note",
+                    "text": note,
+                }
             )
 
     def _register_authenticated(
@@ -803,6 +872,10 @@ class HUDBridge:
                 self._system_status_loop()
             )
 
+            insights_task = asyncio.create_task(
+                self._proactive_insights_loop()
+            )
+
             try:
                 async with websockets.serve(
                     handler,
@@ -812,6 +885,7 @@ class HUDBridge:
                     await self._ws_stop_signal.wait()
             finally:
                 status_task.cancel()
+                insights_task.cancel()
                 try:
                     await status_task
                 except asyncio.CancelledError:

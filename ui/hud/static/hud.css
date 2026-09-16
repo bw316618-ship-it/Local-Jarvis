@@ -40,6 +40,13 @@ html, body {
   position: relative;
   width: 380px;
   height: 380px;
+  /* Smooth dim/undim for the idle "resting" presence below -- everything
+     else in this state system snaps instantly between states (matching
+     how abruptly a real state actually changes: thinking starts the
+     moment a message arrives), but settling into rest is gradual on
+     purpose, since it's meant to read as Jarvis quietly winding down
+     rather than another state transition. */
+  transition: opacity 3s ease;
 }
 
 #reactor,
@@ -485,6 +492,27 @@ html, body {
   opacity: 1;
 }
 
+#audioCuesToggle {
+  position: fixed;
+  top: 20px;
+  right: 150px;
+  background: transparent;
+  border: 1px solid var(--glow, #3ad6ff);
+  color: var(--glow, #3ad6ff);
+  font-size: 11px;
+  letter-spacing: 2px;
+  padding: 6px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0.65;
+  transition: opacity 0.3s ease, border-color 0.6s ease, color 0.6s ease;
+  z-index: 10;
+}
+
+#audioCuesToggle:hover {
+  opacity: 1;
+}
+
 /* ============================================================
    Chat panel
    ============================================================ */
@@ -565,6 +593,17 @@ html, body {
   letter-spacing: 0.5px;
   padding: 2px 12px;
   opacity: 0.75;
+}
+
+.chat-line.proactive {
+  /* Distinct from .jarvis (a reply to something you said) on purpose --
+     this is Jarvis speaking up unprompted, so it reads visually as
+     "noticed something" rather than another turn in the conversation. */
+  align-self: flex-start;
+  background: rgba(216, 75, 255, 0.08);
+  border: 1px solid rgba(216, 75, 255, 0.25);
+  color: #e8c6ff;
+  font-style: italic;
 }
 
 #chatForm {
@@ -692,6 +731,21 @@ html, body {
   --pulse: 1;
 }
 
+/* Idle ambient presence: after RESTING_IDLE_MS of no state change (see
+   hud.js), the reactor settles into a dimmer, slower "resting" look
+   rather than sitting frozen at the same idle brightness indefinitely.
+   Only applies on top of "idle" -- any real state change (listening,
+   thinking, ...) clears data-resting immediately in hud.js, well
+   before this rule could apply to it. */
+#wrap[data-state="idle"][data-resting="true"] {
+  --speed: 0.3;
+  --pulse: 0.6;
+}
+
+#wrap[data-state="idle"][data-resting="true"] #stage {
+  opacity: 0.55;
+}
+
 #wrap[data-state="listening"] {
   --glow: #ffd24a;
   --speed: 1.1;
@@ -714,6 +768,16 @@ html, body {
   --glow: #ff9f43;
   --speed: 1.6;
   --pulse: 1.4;
+}
+
+#wrap[data-state="confirming"] {
+  /* Distinct from "tool" (orange) and "error" (red) on purpose --
+     this is neither working nor broken, it's *waiting on you*.
+     Sharp, fast pulse with no rotation-speed increase (unlike
+     thinking/tool) so it reads as "paused for input", not "busy". */
+  --glow: #d84bff;
+  --speed: 0.5;
+  --pulse: 2.4;
 }
 
 #wrap[data-state="error"] {
@@ -746,6 +810,10 @@ html, body {
 
 #wrap[data-mode="storm"][data-state="tool"] {
   --glow: #ff9f43;
+}
+
+#wrap[data-mode="storm"][data-state="confirming"] {
+  --glow: #e06bff;
 }
 
 #wrap[data-mode="storm"][data-state="error"] {

@@ -1,61 +1,62 @@
 """Tools that control Jarvis's session state and interaction mode."""
 
+from brain import persona_lines
 from voice import session_state
 
 
 def mute_jarvis() -> str:
     session_state.mute()
-    return "Jarvis is now muted. Spoken output is disabled until unmuted."
+    return persona_lines.pick("mute")
 
 
 def unmute_jarvis() -> str:
     session_state.unmute()
-    return "Jarvis is now unmuted."
+    return persona_lines.pick("unmute")
 
 
 def end_session() -> str:
     session_state.request_end()
-    return "Session ending."
+    return persona_lines.pick("end_session")
 
 
 def enter_companion_mode() -> str:
     session_state.enter_companion_mode()
-    return "Companion mode enabled."
+    return persona_lines.pick("enter_companion")
 
 
 def exit_companion_mode() -> str:
     session_state.exit_companion_mode()
-    return "Back to normal mode."
+    return persona_lines.pick("exit_companion")
 
 
 def enter_creative_mode() -> str:
     session_state.enter_creative_mode()
-    return "Creative writing mode enabled."
+    return persona_lines.pick("enter_creative")
 
 
 def exit_creative_mode() -> str:
     session_state.exit_creative_mode()
-    return "Back to normal mode."
+    return persona_lines.pick("exit_creative")
 
 
 def enter_coding_mode() -> str:
     session_state.enter_coding_mode()
-    return "Coding mode enabled."
+    return persona_lines.pick("enter_coding")
 
 
 def exit_coding_mode() -> str:
     session_state.exit_coding_mode()
-    return "Back to normal mode."
+    return persona_lines.pick("exit_coding")
 
 
 def enter_heavy_brain() -> str:
     session_state.enter_heavy_brain()
-    return "Heavy brain enabled -- using the larger model until turned off."
+    return persona_lines.pick("enter_heavy_brain")
 
 
 def exit_heavy_brain() -> str:
     session_state.exit_heavy_brain()
-    return "Back to the fast default model."
+    return persona_lines.pick("exit_heavy_brain")
 
 
 SESSION_TOOL_SCHEMAS = [

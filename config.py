@@ -60,6 +60,15 @@ DEFAULTS = {
     # being dropped.
     "memory_relevance_threshold": 0.35,
 
+    # Proactive insights. The HUD periodically re-runs
+    # memory/insights.py's get_suggestions() (the same check /insights
+    # does on demand) while at least one browser client is connected,
+    # and pushes anything new as an unprompted note rather than only
+    # ever surfacing suggestions when explicitly asked. Kept fairly
+    # infrequent by default -- this is meant to feel like Jarvis
+    # occasionally noticing something, not a notification stream.
+    "proactive_insights_interval_seconds": 1200,
+
     # Streaming.
     "streaming": True,
 
