@@ -25,17 +25,25 @@ ROAMING    Free-roaming: same wander/edge-bounce steering as Billo Rani,
 RETURNING  Steers toward the house position; on arrival, transitions back
            to ASLEEP and redraws the house.
 
-MVP scope: idle + run animation only (no fly/roll/drag physics/right-click
-menu/moods -- those are Billo Rani features that don't matter for "lives in
-a house until let out to roam the screen"). The frame-loading/animation
-approach mirrors br.py's ANIMATION_DEFS pattern closely enough that jump/
-fly/etc. could be layered on later without restructuring this file.
+Personality (ported from Desktop-Pet's br.py, movement/menu subset only --
+none of the Chrome-launching, notepad, or love-letter actions, which don't
+fit a pet that lives in Jarvis's own tool-driven sandbox): while ROAMING,
+right-click opens a context menu with Fly, Jump, and Roll, layered as
+sub-states on top of the existing wander/steer loop rather than replacing
+it -- the pet still has a target and still edge-bounces, fly/jump/roll just
+change how _current_frame and the position update behave for their
+duration. Fly is a toggle (sine-wave vertical bob while wandering, same
+amplitude/speed constants as br.py); jump is a one-shot vertical arc; roll
+is a brief in-place reaction (dizzy roll) that pauses target-seeking. The
+sprite frames for all three already ship in assets/desktop_pet/ (flying{l,
+r}1-3, jump{l,r}, roll1-4) -- only ANIMATION_DEFS wasn't pointing at them.
 """
 import ctypes
 import ctypes.wintypes as wintypes
 import math
 import random
 import threading
+import time
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -57,13 +65,27 @@ WS_EX_NOACTIVATE = 0x08000000
 WM_DESTROY = 0x0002
 WM_LBUTTONDOWN = 0x0201
 WM_NCLBUTTONDOWN = 0x00A1
+WM_RBUTTONUP = 0x0205
 WM_TIMER = 0x0113
 WM_NCHITTEST = 0x0084
 WM_MOUSEACTIVATE = 0x0021
+WM_COMMAND = 0x0111
 
 HTCLIENT = 1
 HTCAPTION = 2
 MA_NOACTIVATE = 3
+
+MF_STRING = 0x00000000
+MF_GRAYED = 0x00000001
+MF_SEPARATOR = 0x00000800
+TPM_RIGHTBUTTON = 0x0002
+TPM_RETURNCMD = 0x0100
+
+# Right-click context menu item IDs (WM_COMMAND wparam low word)
+MENU_ID_TOGGLE = 1001   # "Let out to roam" / "Call home", label depends on state
+MENU_ID_FLY = 1002
+MENU_ID_JUMP = 1003
+MENU_ID_ROLL = 1004
 
 SW_SHOWNOACTIVATE = 4
 SW_HIDE = 0
@@ -195,6 +217,23 @@ user32.SetTimer.argtypes = [
 user32.SetTimer.restype = ctypes.c_size_t
 user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
 user32.TranslateMessage.restype = wintypes.BOOL
+user32.CreatePopupMenu.argtypes = []
+user32.CreatePopupMenu.restype = wintypes.HMENU
+user32.AppendMenuW.argtypes = [
+    wintypes.HMENU, wintypes.UINT, ctypes.c_size_t, wintypes.LPCWSTR,
+]
+user32.AppendMenuW.restype = wintypes.BOOL
+user32.DestroyMenu.argtypes = [wintypes.HMENU]
+user32.DestroyMenu.restype = wintypes.BOOL
+user32.TrackPopupMenuEx.argtypes = [
+    wintypes.HMENU, wintypes.UINT, ctypes.c_int, ctypes.c_int,
+    wintypes.HWND, wintypes.LPVOID,
+]
+user32.TrackPopupMenuEx.restype = wintypes.BOOL
+user32.GetCursorPos.argtypes = [ctypes.POINTER(POINT)]
+user32.GetCursorPos.restype = wintypes.BOOL
+user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+user32.SetForegroundWindow.restype = wintypes.BOOL
 user32.UpdateLayeredWindow.argtypes = [
     wintypes.HWND, wintypes.HDC, ctypes.POINTER(POINT), ctypes.POINTER(SIZE),
     wintypes.HDC, ctypes.POINTER(POINT), wintypes.DWORD,
@@ -222,13 +261,34 @@ kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 
 
-# Animation defs, ported from Desktop-Pet/br.py's ANIMATION_DEFS. Only the
-# states this module actually uses (idle, run) are kept; more (fly, jump,
-# roll, ...) can be added later using the same "{side}" + frame-range shape.
+# Animation defs, ported from Desktop-Pet/br.py's ANIMATION_DEFS.
+# "roll" has no {side}-specific art (br.py: "not side-specific -- same
+# frames both ways") -- template.format(side=...) is a no-op when the
+# template has no {side} token, so it naturally loads the same roll*.png
+# frames under both roll_left and roll_right without special-casing.
 ANIMATION_DEFS = {
     "idle": ("stand{side}", None),
     "run": ("run{side}", (1, 3)),
+    "fly": ("flying{side}", (1, 3)),
+    "jump": ("jump{side}", None),
+    "roll": ("roll", (1, 4)),
 }
+
+# Fly bob (ported from br.py FLY_WAVE_AMPLITUDE/FLY_WAVE_SPEED)
+FLY_WAVE_AMPLITUDE = 2
+FLY_WAVE_SPEED = 0.12
+
+# Jump arc: simple symmetric parabola, apex at JUMP_HEIGHT px after half of
+# JUMP_DURATION_MS, back to baseline at the end. Not a physics sim like
+# br.py's JUMP_IMPULSE + gravity integration -- a fixed-duration arc is
+# enough for a menu-triggered flourish and can't get stuck mid-air.
+JUMP_HEIGHT = 40
+JUMP_DURATION_MS = 500
+
+# Roll (ported from br.py's ANNOY_ROLL_MS -- the shorter "reaction" roll,
+# not the 3s dizzy-drag or 800ms self-destruct variants, neither of which
+# have an equivalent trigger here)
+ROLL_DURATION_MS = 1200
 
 ASLEEP = "asleep"
 ROAMING = "roaming"
@@ -297,6 +357,16 @@ class DesktopPet:
         self.facing_right = True
         self.frame_index = 0
 
+        # Personality sub-states (toggled/triggered from the right-click
+        # menu; layered on top of ROAMING, see module docstring)
+        self.is_flying = False
+        self._fly_phase = 0.0
+        self.is_rolling = False
+        self._roll_end_at = 0.0
+        self.is_jumping = False
+        self._jump_start_at = 0.0
+        self._jump_base_y = 0.0
+
         self.house_image = None      # PIL RGBA, WINDOW_SIZE^2, door-closed art
         self.house_open_image = None  # door-open art, shown briefly on release
         self.anim = {}               # "idle_left"/"idle_right"/"run_left"/"run_right" -> [PIL frames]
@@ -340,10 +410,43 @@ class DesktopPet:
             if self.state != ROAMING:
                 return
             self.state = RETURNING
+            # Personality sub-states only make sense while ROAMING -- drop
+            # them so RETURNING's plain steer-home isn't mid-arc/mid-bob.
+            self.is_flying = False
+            self.is_rolling = False
+            self.is_jumping = False
 
     def is_out(self) -> bool:
         with self._state_lock:
             return self.state != ASLEEP
+
+    def toggle_fly(self):
+        """Toggle the flying bob on/off. Only meaningful while ROAMING;
+        no-op otherwise (asleep/returning have their own movement)."""
+        with self._state_lock:
+            if self.state != ROAMING:
+                return
+            self.is_flying = not self.is_flying
+            self._fly_phase = 0.0
+
+    def jump(self):
+        """Trigger a one-shot vertical hop. No-op if already jumping or
+        not ROAMING -- see JUMP_HEIGHT/JUMP_DURATION_MS for the arc."""
+        with self._state_lock:
+            if self.state != ROAMING or self.is_jumping:
+                return
+            self.is_jumping = True
+            self._jump_start_at = time.monotonic()
+            self._jump_base_y = self._y
+
+    def roll(self):
+        """Trigger a brief in-place roll reaction. No-op if already
+        rolling or not ROAMING."""
+        with self._state_lock:
+            if self.state != ROAMING or self.is_rolling:
+                return
+            self.is_rolling = True
+            self._roll_end_at = time.monotonic() + ROLL_DURATION_MS / 1000.0
 
     # -------------------------
     # Asset loading (ported from br.py's _load_pm / ANIMATION_DEFS expansion)
@@ -446,6 +549,17 @@ class DesktopPet:
         return dx, dy
 
     def _update_roaming(self):
+        now = time.monotonic()
+
+        # Roll: a brief in-place reaction. Pause target-seeking entirely
+        # for its duration, then fall through to normal movement once it
+        # ends (no separate "resume" step needed).
+        if self.is_rolling:
+            if now >= self._roll_end_at:
+                self.is_rolling = False
+            else:
+                return
+
         if self.target_x is None:
             self._choose_target()
         dx, dy = self._step_toward(self.target_x, self.target_y)
@@ -466,6 +580,26 @@ class DesktopPet:
             ny = sh - self.WINDOW_SIZE
             self.vy = -self.vy * self.EDGE_BOUNCE_DAMPING
         self._x, self._y = nx, ny
+
+        # Fly: sine-wave vertical bob layered on top of the normal
+        # steered position, same constants as br.py. Purely cosmetic --
+        # doesn't change vx/vy or the arrival check below.
+        if self.is_flying:
+            self._fly_phase += FLY_WAVE_SPEED
+            self._y += math.sin(self._fly_phase) * FLY_WAVE_AMPLITUDE
+
+        # Jump: fixed-duration parabolic arc, independent of the normal
+        # y position computed above -- overrides it for the arc's
+        # duration, then hands back to normal movement automatically.
+        if self.is_jumping:
+            elapsed_ms = (now - self._jump_start_at) * 1000.0
+            if elapsed_ms >= JUMP_DURATION_MS:
+                self.is_jumping = False
+                self._y = self._jump_base_y
+            else:
+                progress = elapsed_ms / JUMP_DURATION_MS  # 0..1
+                arc = 4 * progress * (1 - progress)  # 0 at ends, 1 at apex
+                self._y = self._jump_base_y - arc * JUMP_HEIGHT
 
         if abs(dx) < self.ARRIVE_THRESHOLD and abs(dy) < self.ARRIVE_THRESHOLD:
             self._choose_target()
@@ -522,8 +656,17 @@ class DesktopPet:
             self.call_home()
 
     def _current_anim_key(self):
-        moving = abs(self.vx) > 0.5 or abs(self.vy) > 0.5
         side = "right" if self.facing_right else "left"
+        # Priority: roll/jump are brief reactions that override whatever
+        # locomotion animation would otherwise play; fly overrides run/idle
+        # since it's still steering toward a target, just airborne.
+        if self.is_rolling:
+            return f"roll_{side}"
+        if self.is_jumping:
+            return f"jump_{side}"
+        if self.is_flying:
+            return f"fly_{side}"
+        moving = abs(self.vx) > 0.5 or abs(self.vy) > 0.5
         return f"{'run' if moving else 'idle'}_{side}"
 
     # -------------------------
@@ -604,6 +747,63 @@ class DesktopPet:
         self.frame_index += 1
 
     # -------------------------
+    # Right-click context menu
+    # -------------------------
+    def _show_context_menu(self, hwnd):
+        with self._state_lock:
+            state = self.state
+            flying = self.is_flying
+
+        menu = user32.CreatePopupMenu()
+        if not menu:
+            return
+
+        try:
+            if state == ASLEEP:
+                user32.AppendMenuW(menu, MF_STRING, MENU_ID_TOGGLE, "Let out to roam")
+            elif state == ROAMING:
+                user32.AppendMenuW(menu, MF_STRING, MENU_ID_TOGGLE, "Call home")
+                user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
+                fly_label = "Stop flying" if flying else "Fly"
+                user32.AppendMenuW(menu, MF_STRING, MENU_ID_FLY, fly_label)
+                user32.AppendMenuW(menu, MF_STRING, MENU_ID_JUMP, "Jump")
+                user32.AppendMenuW(menu, MF_STRING, MENU_ID_ROLL, "Roll")
+            else:  # RETURNING -- already headed home, nothing to offer
+                user32.AppendMenuW(
+                    menu, MF_STRING | MF_GRAYED, MENU_ID_TOGGLE, "Coming home..."
+                )
+
+            pt = POINT()
+            user32.GetCursorPos(ctypes.byref(pt))
+
+            # SetForegroundWindow + the WM_NULL-after-TrackPopupMenu dance
+            # is the documented workaround for a popup menu not dismissing
+            # itself when the owner window can't take focus (we're
+            # WS_EX_NOACTIVATE, same as native_overlay.py's icon).
+            user32.SetForegroundWindow(hwnd)
+            user32.TrackPopupMenuEx(
+                menu, TPM_RIGHTBUTTON, pt.x, pt.y, hwnd, None,
+            )
+            user32.PostMessageW(hwnd, 0, 0, 0)  # WM_NULL, completes the dance
+        finally:
+            user32.DestroyMenu(menu)
+
+    def _handle_menu_command(self, command_id):
+        if command_id == MENU_ID_TOGGLE:
+            with self._state_lock:
+                state = self.state
+            if state == ASLEEP:
+                self.release()
+            elif state == ROAMING:
+                self.call_home()
+        elif command_id == MENU_ID_FLY:
+            self.toggle_fly()
+        elif command_id == MENU_ID_JUMP:
+            self.jump()
+        elif command_id == MENU_ID_ROLL:
+            self.roll()
+
+    # -------------------------
     # Window proc / message loop
     # -------------------------
     def _window_proc(self, hwnd, msg, wparam, lparam):
@@ -613,6 +813,12 @@ class DesktopPet:
             return HTCLIENT
         if msg == WM_LBUTTONDOWN:
             self._drag_and_maybe_act(hwnd)
+            return 0
+        if msg == WM_RBUTTONUP:
+            self._show_context_menu(hwnd)
+            return 0
+        if msg == WM_COMMAND:
+            self._handle_menu_command(wparam & 0xFFFF)
             return 0
         if msg == WM_TIMER:
             if wparam == self.TIMER_RENDER:

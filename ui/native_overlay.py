@@ -41,8 +41,33 @@ SW_HIDE = 0
 
 SWP_NOACTIVATE = 0x0010
 SWP_SHOWWINDOW = 0x0040
+SWP_NOMOVE = 0x0002
+SWP_NOSIZE = 0x0001
 
 HWND_TOPMOST = -1
+
+# UIPI (User Interface Privilege Isolation) blocks certain window messages
+# from a lower-integrity process (us, unelevated) from reaching a
+# higher-integrity one, and Windows also silently drops a non-elevated
+# window's HWND_TOPMOST status the moment an elevated window activates --
+# nothing raises an error, the overlay/pet just quietly falls behind. Two
+# independent mitigations, both required:
+#   1. ChangeWindowMessageFilterEx: explicitly allow the handful of
+#      messages we might legitimately receive across the privilege
+#      boundary (WM_COPYDATA now, WM_DROPFILES/theme messages later)
+#      instead of having them silently discarded.
+#   2. Re-assert HWND_TOPMOST on every render tick rather than once at
+#      startup, so the window climbs back on top within one timer
+#      interval of an elevated app stealing it.
+MSGFLT_ALLOW = 1
+WM_COPYDATA = 0x004A
+WM_DROPFILES = 0x0233
+WM_THEMECHANGED = 0x031A
+WM_UIPI_ALLOWED_MESSAGES = (
+    WM_COPYDATA,
+    WM_DROPFILES,
+    WM_THEMECHANGED,
+)
 
 ULW_ALPHA = 0x00000002
 
@@ -151,6 +176,21 @@ user32.CreateWindowExW.argtypes = [
     wintypes.LPVOID,
 ]
 user32.CreateWindowExW.restype = wintypes.HWND
+
+# ChangeWindowMessageFilterEx is Windows 8+ only (its Windows 7 ancestor,
+# ChangeWindowMessageFilter, has no per-window overload). Both the
+# lookup and every call site below are wrapped defensively so this is a
+# no-op rather than a crash on older systems.
+try:
+    user32.ChangeWindowMessageFilterEx.argtypes = [
+        wintypes.HWND,
+        wintypes.UINT,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+    ]
+    user32.ChangeWindowMessageFilterEx.restype = wintypes.BOOL
+except AttributeError:
+    pass
 
 user32.SetWindowPos.argtypes = [
     wintypes.HWND,
@@ -938,6 +978,59 @@ class NativeOverlay:
         elif is_icon_click:
             self.toggle_collapsed()
 
+    def _apply_uipi_message_filter(self):
+        """Allow a small set of messages through the UIPI boundary.
+
+        Best-effort: silently no-ops on Windows 7 (no
+        ChangeWindowMessageFilterEx) or if any individual call fails, since
+        this is a defensive widening, not something the overlay depends on
+        to function.
+        """
+        change_filter = getattr(
+            user32, "ChangeWindowMessageFilterEx", None
+        )
+
+        if not change_filter or not self._hwnd:
+            return
+
+        for message in WM_UIPI_ALLOWED_MESSAGES:
+            try:
+                change_filter(
+                    self._hwnd,
+                    message,
+                    MSGFLT_ALLOW,
+                    None,
+                )
+            except OSError as error:
+                print(
+                    "[Jarvis overlay] "
+                    f"ChangeWindowMessageFilterEx failed for "
+                    f"message {message:#06x}: {error}"
+                )
+
+    def _reassert_topmost(self, hwnd):
+        """Re-apply HWND_TOPMOST every render tick.
+
+        Windows silently drops a non-elevated window's topmost status the
+        moment an elevated window becomes the foreground app -- no error,
+        the overlay just falls behind it. A one-time SetWindowPos at
+        startup (still done in _run for the initial placement) does not
+        survive that. Re-asserting here means the overlay climbs back on
+        top within one RENDER_INTERVAL_MS tick of losing it, the same
+        pattern already used for the desktop pet's topmost re-assertion.
+        """
+        user32.SetWindowPos(
+            hwnd,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE
+            | SWP_NOSIZE
+            | SWP_NOACTIVATE,
+        )
+
     def _window_proc(
         self,
         hwnd,
@@ -971,6 +1064,7 @@ class NativeOverlay:
             return 0
 
         if msg == WM_TIMER:
+            self._reassert_topmost(hwnd)
             self._render()
             return 0
 
@@ -1084,6 +1178,8 @@ class NativeOverlay:
 
             self._ready.set()
             return
+
+        self._apply_uipi_message_filter()
 
         user32.SetWindowPos(
             self._hwnd,
