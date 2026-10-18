@@ -23,6 +23,7 @@
   "top_p": 0.9,
   "piper_voice_model": "voices/en_US-amy-medium.onnx",
   "ors_api_key": null,
+  "automatic1111_url": null,
   "heavy_model": null,
   "hud_http_port": 8765,
   "hud_ws_port": 8766,

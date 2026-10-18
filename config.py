@@ -81,6 +81,12 @@ DEFAULTS = {
     # Maps.
     "ors_api_key": None,
 
+    # Local image generation. None means "assume the default AUTOMATIC1111
+    # URL", not "disabled" -- tools/image_gen.py reports a clear error if
+    # nothing is actually listening there, same fallback shape as
+    # ors_api_key above.
+    "automatic1111_url": None,
+
     # Model tiers. "model" is the daily-driver default (small/fast,
     # matched to the 6GB-VRAM Nitro V15 constraint); "heavy_model" is an
     # optional larger model the user can opt into per-session via the

@@ -46,6 +46,8 @@ The goal isn't a chatbot with some tools bolted on. It's "find the PDF where I w
 - Per-mode model override (`mode_models` in config): give coding mode a coding-specialized local model without switching companion/creative conversations to it too
 - Voice in and out: wake word ("Hey Jarvis"), pause-detection recording, local TTS (Piper), background model warm-up, mid-session mute
 - Vision: screen OCR (`read_screen_text`, `find_text_on_screen`) plus general image understanding via a local Moondream model
+- Webcam: capture a still frame (`capture_webcam_image`) or describe what the camera sees (`describe_webcam`) via the same local Moondream model, with an optional stylized "X-ray vision" filter; needs `opencv-python`
+- Local image generation: `generate_image` turns a text prompt into a PNG via a local AUTOMATIC1111 Stable Diffusion server, no cloud image API involved
 - Full desktop control: files (sandboxed and unrestricted), windows, mouse and keyboard, shell commands, git
 - Graphical HUD: an optional browser-based reactor/"data storm" visualization with a live chat panel and browser-side confirmation prompts, in addition to the terminal
 - Standalone daemon mode: run Jarvis as a background process reachable purely from a browser tab, independent of any terminal session, with its own launcher scripts
@@ -184,6 +186,7 @@ Defaults live in `config.py`. To override any of them, copy `jarvis_config.examp
 | `index_max_file_mb` | `20` | `tools/file_index.py` |
 | `piper_voice_model` | `voices/en_US-amy-medium.onnx` | `voice/voice.py` |
 | `ors_api_key` | `null` | `tools/routing.py`, OpenRouteService key for walking/cycling/driving directions; without it, driving directions fall back to the keyless OSRM demo server and walking/cycling are unavailable |
+| `automatic1111_url` | `null` (goes to `http://127.0.0.1:7860`) | `tools/image_gen.py`, local AUTOMATIC1111 Stable Diffusion server address for `generate_image` |
 | `hud_http_port` / `hud_ws_port` | `8765` / `8766` | `ui/hud_server.py` |
 
 ## Model notes
@@ -244,6 +247,8 @@ Everything else is just a normal message, Jarvis decides on its own whether a to
 - System: run shell commands, open apps, files, and URLs (confirmed), live diagnostics (`system_status`, `top_processes`, `get_battery_level`, all read-only)
 - Desktop: mouse and keyboard control (confirmed), window list, focus, minimize, and close by title substring (list is read-only, the rest confirmed)
 - Screen and vision: OCR the screen (`read_screen_text`, `find_text_on_screen`, read-only) or ask a local vision model what is actually on screen or in an image (`describe_image`, read-only); saving a screenshot to disk (`take_screenshot`) is confirmed, since it is a file write to an arbitrary path
+- Webcam: capture a still frame (`capture_webcam_image`) or ask the local vision model what the camera sees (`describe_webcam`), either plain or with a stylized X-ray-vision filter; both confirmed, since opening a physical camera is a stronger privacy boundary than reading an already-displayed screen
+- Image generation: `generate_image` turns a text prompt into a saved PNG via a local AUTOMATIC1111 Stable Diffusion server (confirmed, writes a file and can take a while)
 - Git: structured `git_status`/`git_log`/`git_diff`/`git_branch_list` (free), `git_add`/`git_commit`/`git_checkout`/`git_push` (confirmed) — the same toolset coding mode gets, against any `repo_path`
 - Web: `web_search` for anything current or external (read-only)
 - Memory: `remember_fact` for durable facts worth persisting across sessions (confirmed, since it is replayed into every future prompt as "known facts about the user")
@@ -278,8 +283,10 @@ A few of the newer tools need something installed or downloaded beyond `pip inst
 - Now playing on Windows: install `winsdk` (`pip install winsdk`) for the WinRT media session API. Music control on Windows (play, pause, skip, volume) works without any extra install, it uses simulated media key presses.
 - Music control and now-playing on Linux: install `playerctl` through your package manager (for example `sudo apt install playerctl`), not a Python package.
 - Music control and now-playing on macOS: no extra install, this uses AppleScript against Music.app.
+- Webcam capture and description: install `opencv-python` (`pip install opencv-python`). Without it, `capture_webcam_image` and `describe_webcam` report that clearly rather than failing with a stack trace.
+- Local image generation: install and run [AUTOMATIC1111's Stable Diffusion WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui) locally with its `--api` flag, and pull a checkpoint into it. This needs a real GPU with several GB of free VRAM on top of whatever the chat model is already using -- check your hardware before investing time here. `generate_image` talks to it over `http://127.0.0.1:7860` by default; point `automatic1111_url` in `jarvis_config.json` at a different host/port if it runs elsewhere.
 
-None of these packages are added to `requirements.txt` unconditionally, since `winsdk` and `pyobjc-framework-CoreLocation` only have wheels for their respective platforms and would break installation everywhere else.
+None of these packages are added to `requirements.txt` unconditionally, since `winsdk` and `pyobjc-framework-CoreLocation` only have wheels for their respective platforms and would break installation everywhere else, and `opencv-python` is a heavy, often-unused dependency for installs that never touch the webcam.
 
 ## Safety: confirmation gating
 
@@ -292,7 +299,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-378 tests. Covers confirmation gating, the chat/planning/streaming flow, memory storage on every exit path, file-safety edge cases (including sandbox-escape attempts), incremental indexing, insight/pattern detection, config loading, the local calendar store, battery reporting, mute/end-session/mode state, the location tool's fallback ordering (tested against MaxMind's real public GeoLite2 test database, not a mock), and the mode system specifically: every tool schema offered to the model in a given mode is checked to actually resolve in that mode's dispatch registry (the regression guard for the class of bug where a tool is offered but not wired up), relevance-based tool filtering (the narrowed list offered to the model is always a subset of the full registry and never drops the always-available session-control tools), creative project/document retrieval scoping (a project must stay searchable across all its documents, never narrowed to whichever was ingested most recently, and creative-project content must not leak into ordinary normal-mode conversations), coding mode's tools against real temporary files and real subprocess calls rather than mocks, and per-mode model resolution precedence. Heavy runtime dependencies (Ollama, ChromaDB, sentence-transformers) are mocked, so it stays fast and does not need the full model stack installed.
+498 tests. Covers confirmation gating, the chat/planning/streaming flow, memory storage on every exit path, file-safety edge cases (including sandbox-escape attempts), incremental indexing, insight/pattern detection, config loading, the local calendar store, battery reporting, mute/end-session/mode state, the location tool's fallback ordering (tested against MaxMind's real public GeoLite2 test database, not a mock), webcam capture and description (including the missing-opencv and no-camera degrade paths, and the X-ray stylization branch) and local image generation (including the no-local-server and timeout degrade paths and input clamping), and the mode system specifically: every tool schema offered to the model in a given mode is checked to actually resolve in that mode's dispatch registry (the regression guard for the class of bug where a tool is offered but not wired up), relevance-based tool filtering (the narrowed list offered to the model is always a subset of the full registry and never drops the always-available session-control tools), creative project/document retrieval scoping (a project must stay searchable across all its documents, never narrowed to whichever was ingested most recently, and creative-project content must not leak into ordinary normal-mode conversations), coding mode's tools against real temporary files and real subprocess calls rather than mocks, and per-mode model resolution precedence. Heavy runtime dependencies (Ollama, ChromaDB, sentence-transformers) are mocked, so it stays fast and does not need the full model stack installed.
 
 Runs automatically on every push via GitHub Actions (`.github/workflows/tests.yml`).
 
@@ -345,6 +352,8 @@ Local-Jarvis/
 │   ├── window_control.py     # Window list/focus/minimize/close (Windows/macOS only)
 │   ├── screen.py              # Screenshots (confirmed) + OCR (read-only)
 │   ├── vision.py              # Image/screen understanding via local Moondream
+│   ├── webcam.py               # capture_webcam_image/describe_webcam, plus the X-ray stylization filter
+│   ├── image_gen.py             # generate_image via a local AUTOMATIC1111 Stable Diffusion server
 │   ├── diagnostics.py         # CPU/memory/disk/process/battery stats, feeds /status
 │   ├── memory_tools.py        # remember_fact wrapper (confirmed)
 │   ├── web.py                  # Web search
@@ -394,7 +403,7 @@ Local-Jarvis/
 | 12, Multi-mode assistant | Done | Companion mode (open conversation, no forced tools), creative mode (document- and project-scoped writing collaboration), coding mode (test running, linting, code search against any repo), per-mode model override |
 | 13, Desktop app shell | Done | Windows system-tray app (`jarvis_tray.py`, pystray + pywebview, autostart via `.vbs` launcher) hosting the HUD in a native window; a native Win32 floating overlay (`ui/native_overlay.py`) built on raw GDI for true per-pixel transparency; trusted-device authentication (`security/devices.py`) shared across every transport; per-turn tool-relevance filtering (`brain/tool_relevance.py`) so a local model isn't handed the full 65+-schema registry on every message |
 
-Bigger directions still on the table: webcam capture and an X-ray-style vision effect built on the existing Moondream pipeline, a HUD widget system (text notes, open/close/reset, a home dashboard widget, an in-HUD PDF viewer, map control), and local image generation through a diffusion backend such as Automatic1111 or ComfyUI. Smart home integration and 3D printing support are explicitly out of scope for this project.
+Bigger directions still on the table: a HUD widget system (text notes, open/close/reset, a home dashboard widget, an in-HUD PDF viewer, map control). Webcam capture with an X-ray-style vision effect, and local image generation through a diffusion backend (AUTOMATIC1111), are both done -- see `capture_webcam_image`/`describe_webcam` and `generate_image` above. Smart home integration and 3D printing support are explicitly out of scope for this project.
 
 ## License
 
