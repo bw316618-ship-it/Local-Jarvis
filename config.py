@@ -76,6 +76,20 @@ DEFAULTS = {
     "temperature": 0.2,
     "top_p": 0.9,
 
+    # LLM backend. "ollama" (default) keeps today's behaviour. "openai"
+    # talks to any OpenAI-compatible server -- Atomic Chat's local server
+    # (http://localhost:1337/v1), llama.cpp's llama-server, LM Studio, vLLM
+    # -- see brain/backends.py. With "openai", "model" / "heavy_model" /
+    # "mode_models" must be model ids as that server lists them, not Ollama
+    # tags, and num_ctx is ignored: those servers fix the context window
+    # when the model is loaded, not per request. openai_api_key is only
+    # sent as a bearer token; local servers generally ignore it.
+    "llm_backend": "ollama",
+    "ollama_host": "http://localhost:11434",
+    "openai_base_url": "http://localhost:1337/v1",
+    "openai_api_key": "not-needed",
+    "llm_request_timeout_seconds": 120,
+
     "piper_voice_model": "voices/en_US-amy-medium.onnx",
 
     # Maps.

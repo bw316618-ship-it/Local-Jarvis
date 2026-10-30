@@ -23,6 +23,7 @@ The goal isn't a chatbot with some tools bolted on. It's "find the PDF where I w
   - [Standalone daemon (browser-only)](#standalone-daemon-browser-only)
 - [Configuration](#configuration)
 - [Model notes](#model-notes)
+  - [Using a different LLM backend](#using-a-different-llm-backend)
 - [Command reference](#command-reference)
 - [What Jarvis can do](#what-jarvis-can-do)
 - [Optional setup for newer tools](#optional-setup-for-newer-tools)
@@ -35,7 +36,7 @@ The goal isn't a chatbot with some tools bolted on. It's "find the PDF where I w
 
 ## Features
 
-- Offline LLM via [Ollama](https://ollama.com), tool-calling loop with confirmation gating on anything state-changing
+- Offline LLM via [Ollama](https://ollama.com), tool-calling loop with confirmation gating on anything state-changing. Optionally runs on any OpenAI-compatible local server instead (Atomic Chat, llama.cpp's `llama-server`, LM Studio), see [Using a different LLM backend](#using-a-different-llm-backend)
 - Four operating modes (normal, companion, creative, coding), each with its own system prompt and its own tool list, so a conversation-mode chat isn't tempted to reach for `run_tests` and a coding session isn't cluttered with creative-writing tools it'll never use
 - Streaming responses, replies print and (optionally) speak sentence by sentence as they generate, not after the whole reply is ready
 - Short-term and long-term memory: verbatim recent turns for pronoun-heavy follow-ups ("open it", "try that again"), plus semantic recall of past sessions and explicitly remembered facts (`remember_fact`)
@@ -168,6 +169,11 @@ Defaults live in `config.py`. To override any of them, copy `jarvis_config.examp
 
 | Key | Default | Used by |
 |---|---|---|
+| `llm_backend` | `"ollama"` | `brain/backends.py`, `"ollama"` or `"openai"` (any OpenAI-compatible server), see [Using a different LLM backend](#using-a-different-llm-backend) |
+| `ollama_host` | `http://localhost:11434` | `brain/backends.py`, where the Ollama server listens |
+| `openai_base_url` | `http://localhost:1337/v1` | `brain/backends.py`, only read when `llm_backend` is `"openai"`; the default is Atomic Chat's local server |
+| `openai_api_key` | `"not-needed"` | `brain/backends.py`, sent as a bearer token; local servers generally ignore it |
+| `llm_request_timeout_seconds` | `120` | `brain/backends.py`, read timeout for the `"openai"` backend (covers a slow first token while a model loads) |
 | `model` | `qwen3:4b` | `brain/llm.py`, the default model for any mode without its own entry in `mode_models` |
 | `mode_models` | `{}` | `brain/llm.py`, per-mode model override, e.g. `{"coding": "qwen2.5-coder:3b"}` to give coding mode its own model |
 | `num_ctx` | `8192` | `brain/llm.py`, raise if tool schemas get silently truncated |
@@ -204,6 +210,30 @@ Coding mode and per-mode models: a general-purpose 4B model writes noticeably we
 On a 6GB card, `qwen2.5-coder:3b` is the safer default: `qwen2.5-coder:7b` needs roughly 5.5GB for weights alone, which leaves little headroom for context plus whatever else shares the GPU, and Ollama will quietly offload layers to CPU rather than fail outright, which just shows up as slow. `ollama ps` shows whether a loaded model landed fully on GPU or spilled to CPU.
 
 Piper voices are not bundled, download a `.onnx` and `.onnx.json` pair from the [Piper voices list](https://github.com/rhasspy/piper/blob/master/VOICES.md), place both in `voices/`, and point `piper_voice_model` at the `.onnx` file if it is not the default.
+
+### Using a different LLM backend
+
+Ollama is the default and nothing changes unless you opt in. Jarvis can instead run its chat model on any OpenAI-compatible local server, for example [Atomic Chat](https://github.com/AtomicBot-ai/Atomic-Chat) (server at `http://localhost:1337/v1`), llama.cpp's `llama-server`, or LM Studio. The reason to do this is the inference engine underneath: those servers can offer things Ollama does not, such as a compressed KV cache or speculative decoding, which may matter on a 6GB card. Those are settings of the server, not of Jarvis, and any speed or memory gain depends on your model and hardware, so measure it before relying on it.
+
+```json
+{
+  "llm_backend": "openai",
+  "openai_base_url": "http://localhost:1337/v1",
+  "model": "<model id exactly as the server lists it>",
+  "heavy_model": "<another model id, or null>"
+}
+```
+
+Start the server and load a model before launching Jarvis. `OpenAICompatClient.list_models()` (in `brain/backends.py`) returns the ids the server reports, which is what `model`, `heavy_model` and `mode_models` must use, not Ollama tags like `qwen3:4b`.
+
+Things to know:
+
+- **Context size** is fixed by the server when the model loads. `num_ctx` is ignored on this backend, so set the context length in the server (or Atomic Chat's model settings).
+- **Model switching** (coding mode's `mode_models` entry, `/brain heavy`) only works if the server will serve or load the requested model. Servers that host one loaded model at a time will answer with whatever is loaded, or an error; check how yours behaves before relying on per-mode models.
+- **Tool calling** depends on the server and model both supporting it. If tool calls come back malformed, Jarvis refuses to run them (they fail visibly rather than running with guessed arguments).
+- **Reasoning blocks:** Qwen3-style `<think>...</think>` text is removed before it reaches the HUD or text-to-speech, including when a tag is split across stream chunks.
+- **Vision tools** (`describe_image`, webcam description) still use Ollama directly (a Moondream model) whichever backend is selected, so keep Ollama installed if you use them.
+- Everything stays local: the default base URL is loopback, and no cloud provider is configured.
 
 ## Command reference
 
@@ -299,7 +329,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-498 tests. Covers confirmation gating, the chat/planning/streaming flow, memory storage on every exit path, file-safety edge cases (including sandbox-escape attempts), incremental indexing, insight/pattern detection, config loading, the local calendar store, battery reporting, mute/end-session/mode state, the location tool's fallback ordering (tested against MaxMind's real public GeoLite2 test database, not a mock), webcam capture and description (including the missing-opencv and no-camera degrade paths, and the X-ray stylization branch) and local image generation (including the no-local-server and timeout degrade paths and input clamping), and the mode system specifically: every tool schema offered to the model in a given mode is checked to actually resolve in that mode's dispatch registry (the regression guard for the class of bug where a tool is offered but not wired up), relevance-based tool filtering (the narrowed list offered to the model is always a subset of the full registry and never drops the always-available session-control tools), creative project/document retrieval scoping (a project must stay searchable across all its documents, never narrowed to whichever was ingested most recently, and creative-project content must not leak into ordinary normal-mode conversations), coding mode's tools against real temporary files and real subprocess calls rather than mocks, and per-mode model resolution precedence. Heavy runtime dependencies (Ollama, ChromaDB, sentence-transformers) are mocked, so it stays fast and does not need the full model stack installed.
+528 tests. Covers confirmation gating, the chat/planning/streaming flow, memory storage on every exit path, file-safety edge cases (including sandbox-escape attempts), incremental indexing, insight/pattern detection, config loading, the local calendar store, battery reporting, mute/end-session/mode state, the location tool's fallback ordering (tested against MaxMind's real public GeoLite2 test database, not a mock), webcam capture and description (including the missing-opencv and no-camera degrade paths, and the X-ray stylization branch) and local image generation (including the no-local-server and timeout degrade paths and input clamping), and the mode system specifically: every tool schema offered to the model in a given mode is checked to actually resolve in that mode's dispatch registry (the regression guard for the class of bug where a tool is offered but not wired up), relevance-based tool filtering (the narrowed list offered to the model is always a subset of the full registry and never drops the always-available session-control tools), creative project/document retrieval scoping (a project must stay searchable across all its documents, never narrowed to whichever was ingested most recently, and creative-project content must not leak into ordinary normal-mode conversations), coding mode's tools against real temporary files and real subprocess calls rather than mocks, per-mode model resolution precedence, and the OpenAI-compatible LLM backend (tool-call id/argument translation, fragmented streamed tool calls, `<think>` stripping across chunk boundaries, error paths, all against a mock HTTP transport). Heavy runtime dependencies (Ollama, ChromaDB, sentence-transformers) are mocked, so it stays fast and does not need the full model stack installed.
 
 Runs automatically on every push via GitHub Actions (`.github/workflows/tests.yml`).
 
@@ -321,7 +351,8 @@ Local-Jarvis/
 ├── security/
 │   └── devices.py           # Trusted-device auth for the WebSocket/HUD transports: SHA-256-hashed tokens, bootstrap + peer-approval flow
 ├── brain/
-│   ├── llm.py               # Ollama wrapper, streaming tool-calling loop, short-term memory, plan-skip, per-mode model resolution
+│   ├── llm.py               # Streaming tool-calling loop, short-term memory, plan-skip, per-mode model resolution
+│   ├── backends.py          # LLM client factory: Ollama (default) or any OpenAI-compatible server (Atomic Chat, llama-server, LM Studio), translating tool calls, streaming and <think> blocks
 │   ├── mode_config.py       # NORMAL/COMPANION/CREATIVE/CODING: prompt + tool schemas + dispatch functions + risky set, assembled from one module list per mode
 │   ├── fast_router.py       # Cheap pre-LLM routing for trivial turns
 │   ├── tool_relevance.py    # Embedding-based per-turn narrowing of the tool list offered to the model once a mode's registry exceeds a configured size
