@@ -2,7 +2,7 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
-from ollama import Client
+from brain.backends import make_client
 
 from memory.retriever import JarvisMemory
 from memory.audit_log import log_tool_call
@@ -227,7 +227,10 @@ class JarvisLLM:
     _session_state = None
 
     def __init__(self, model=None, confirm_callback=None, session_state=None, task_store=None):
-        self.client = Client(host="http://localhost:11434")
+        # Ollama by default; CONFIG["llm_backend"] = "openai" points Jarvis
+        # at any OpenAI-compatible server (Atomic Chat, llama-server, ...).
+        # See brain/backends.py.
+        self.client = make_client()
         self._explicit_model_override = model
         self.model = model or CONFIG["model"]
         self.memory = JarvisMemory()
